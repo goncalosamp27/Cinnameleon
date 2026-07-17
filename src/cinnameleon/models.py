@@ -108,3 +108,32 @@ class ConfigLoadResult:
             for issue in self.issues
             if issue.level is IssueLevel.ERROR
         )
+    
+class Mode(str, Enum):
+    """Global appearance mode."""
+
+    DARK = "dark"
+    LIGHT = "light"
+
+
+@dataclass(frozen=True)
+class EffectiveAppearance:
+    """Final appearance values after resolving profile and defaults."""
+
+    gtk_theme: str | None = None
+    cinnamon_theme: str | None = None
+    window_borders: str | None = None
+    icon_theme: str | None = None
+    cursor_theme: str | None = None
+    fonts: FontSettings = field(default_factory=FontSettings)
+
+
+@dataclass(frozen=True)
+class EffectiveProfile:
+    """A profile fully resolved for one appearance mode."""
+
+    id: str
+    name: str
+    mode: Mode
+    wallpaper: Path
+    appearance: EffectiveAppearance
