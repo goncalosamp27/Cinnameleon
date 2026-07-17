@@ -12,10 +12,20 @@ from cinnameleon.config import (
     resolve_config_path,
 )
 from cinnameleon.inspector import print_inspection
-from cinnameleon.models import IssueLevel, Mode
+from cinnameleon.models import (
+    ConfigIssue,
+    Configuration,
+    IssueLevel,
+    Mode,
+)
 from cinnameleon.resolver import (
     ProfileNotFoundError,
     resolve_profile,
+)
+from cinnameleon.settings_backend import (
+    SettingChange,
+    SettingsBackend,
+    SettingsBackendError,
 )
 from cinnameleon.validator import (
     validate_configuration_resources,
@@ -29,7 +39,9 @@ def _handle_inspect(_: argparse.Namespace) -> int:
     return 0
 
 
-def _print_issues(issues: Sequence) -> None:
+def _print_issues(
+    issues: Sequence[ConfigIssue],
+) -> None:
     """Print configuration issues."""
 
     if not issues:
@@ -52,6 +64,41 @@ def _print_issues(issues: Sequence) -> None:
         )
 
 
+def _has_errors(
+    issues: Sequence[ConfigIssue],
+) -> bool:
+    """Return whether an issue sequence contains an error."""
+
+    return any(
+        issue.level is IssueLevel.ERROR
+        for issue in issues
+    )
+
+
+def _load_validated_configuration(
+    config_path: Path,
+) -> tuple[
+    Configuration | None,
+    tuple[ConfigIssue, ...],
+]:
+    """Load configuration and validate installed resources."""
+
+    result = load_configuration(config_path)
+    issues = list(result.issues)
+
+    if result.config is not None:
+        issues.extend(
+            validate_configuration_resources(
+                result.config
+            )
+        )
+
+    if result.config is None or _has_errors(issues):
+        return None, tuple(issues)
+
+    return result.config, tuple(issues)
+
+
 def _handle_check(arguments: argparse.Namespace) -> int:
     """Load and validate the YAML configuration."""
 
@@ -67,10 +114,7 @@ def _handle_check(arguments: argparse.Namespace) -> int:
             )
         )
 
-    has_errors = any(
-        issue.level is IssueLevel.ERROR
-        for issue in issues
-    )
+    has_errors = _has_errors(issues)
 
     print("Cinnameleon configuration check")
     print("=" * 32)
@@ -180,6 +224,116 @@ def _handle_resolve(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _print_change_plan(
+    changes: Sequence[SettingChange],
+) -> None:
+    """Print current and target values for an apply operation."""
+
+    print()
+    print("Changes")
+    print("-" * 32)
+
+    for change in changes:
+        if change.requires_update:
+            print(f"→ {change.label}")
+            print(f"  Current : {change.current_value}")
+            print(f"  Target  : {change.target_value}")
+        else:
+            print(
+                f"= {change.label}: "
+                f"{change.current_value}"
+            )
+
+
+def _handle_apply(arguments: argparse.Namespace) -> int:
+    """Resolve and apply one appearance profile."""
+
+    config_path = resolve_config_path(arguments.config)
+    configuration, issues = _load_validated_configuration(
+        config_path
+    )
+
+    if configuration is None:
+        print("Cannot apply profile: configuration is invalid.")
+        _print_issues(issues)
+        return 1
+
+    try:
+        profile = resolve_profile(
+            configuration=configuration,
+            profile_id=arguments.profile,
+            mode=Mode(arguments.mode),
+        )
+    except ProfileNotFoundError as error:
+        print(f"Error: {error}")
+        return 1
+
+    backend = SettingsBackend()
+
+    try:
+        changes = backend.plan_profile(
+            profile,
+            include_cinnamon_theme=(
+                arguments.include_cinnamon_theme
+            ),
+        )
+    except SettingsBackendError as error:
+        print(f"Cannot inspect system settings: {error}")
+        return 1
+
+    print("Cinnameleon apply")
+    print("=" * 32)
+    print(f"Profile       : {profile.id}")
+    print(f"Name          : {profile.name}")
+    print(f"Mode          : {profile.mode.value}")
+    print(f"Configuration : {config_path}")
+
+    _print_change_plan(changes)
+
+    if (
+        profile.appearance.cinnamon_theme is not None
+        and not arguments.include_cinnamon_theme
+    ):
+        print()
+        print(
+            "! Cinnamon theme was skipped for session safety."
+        )
+        print(
+            "  Use --include-cinnamon-theme only for "
+            "explicit testing."
+        )
+
+    required_count = sum(
+        change.requires_update
+        for change in changes
+    )
+
+    print()
+
+    if arguments.dry_run:
+        print(
+            "Dry run complete: "
+            f"{required_count} setting(s) would change."
+        )
+        return 0
+
+    if required_count == 0:
+        print("No changes are required.")
+        return 0
+
+    try:
+        applied = backend.apply_changes(changes)
+    except SettingsBackendError as error:
+        print(f"Failed to apply profile: {error}")
+        return 1
+
+    print(
+        f"Applied {len(applied)} setting change(s) successfully."
+    )
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
 
@@ -246,6 +400,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resolve_parser.set_defaults(handler=_handle_resolve)
 
+    apply_parser = subcommands.add_parser(
+        "apply",
+        help="Apply a profile to the current Cinnamon session.",
+    )
+    apply_parser.add_argument(
+        "profile",
+        help="ID of the profile to apply.",
+    )
+    apply_parser.add_argument(
+        "--mode",
+        choices=tuple(mode.value for mode in Mode),
+        default=Mode.DARK.value,
+        help="Appearance mode. Defaults to dark.",
+    )
+    apply_parser.add_argument(
+        "--config",
+        type=Path,
+        help=(
+            "Configuration file path. Defaults to "
+            "~/.config/cinnameleon/config.yaml."
+        ),
+    )
+    apply_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show changes without modifying the system.",
+    )
+    apply_parser.add_argument(
+        "--include-cinnamon-theme",
+        action="store_true",
+        help=(
+            "Also reload the Cinnamon shell theme. "
+            "This can destabilize the current session."
+        ),
+    )
+
+    apply_parser.set_defaults(handler=_handle_apply)
+
     return parser
 
 
@@ -255,4 +447,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     arguments = parser.parse_args(argv)
 
-    return arguments.handler(arguments)
+    handler = getattr(arguments, "handler", None)
+
+    if handler is None:
+        parser.print_help()
+        return 2
+
+    return handler(arguments)
