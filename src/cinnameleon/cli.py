@@ -30,6 +30,10 @@ from cinnameleon.settings_backend import (
 from cinnameleon.validator import (
     validate_configuration_resources,
 )
+from cinnameleon.snapshot import (
+    SnapshotError,
+    SnapshotStore,
+)
 
 
 def _handle_inspect(_: argparse.Namespace) -> int:
@@ -278,9 +282,11 @@ def _handle_apply(arguments: argparse.Namespace) -> int:
             ),
         )
     except SettingsBackendError as error:
-        print(f"Cannot inspect system settings: {error}")
+        print(f"Failed to apply profile: {error}")
+        print("Restore the previous state with:")
+        print("  cinnameleon restore")
         return 1
-
+    
     print("Cinnameleon apply")
     print("=" * 32)
     print(f"Profile       : {profile.id}")
@@ -321,6 +327,20 @@ def _handle_apply(arguments: argparse.Namespace) -> int:
         print("No changes are required.")
         return 0
 
+    store = SnapshotStore()
+
+    try:
+        safety_snapshot = backend.capture_snapshot()
+        snapshot_path = store.save(safety_snapshot)
+    except (SettingsBackendError, SnapshotError) as error:
+        print(
+            "Profile was not applied because the safety "
+            f"snapshot failed: {error}"
+        )
+        return 1
+
+    print(f"Safety snapshot: {snapshot_path}")
+
     try:
         applied = backend.apply_changes(changes)
     except SettingsBackendError as error:
@@ -333,6 +353,93 @@ def _handle_apply(arguments: argparse.Namespace) -> int:
 
     return 0
 
+def _handle_snapshot(arguments: argparse.Namespace) -> int:
+    """Save the current desktop appearance state."""
+
+    backend = SettingsBackend()
+    store = SnapshotStore()
+
+    try:
+        snapshot = backend.capture_snapshot()
+        snapshot_path = store.save(
+            snapshot,
+            arguments.output,
+        )
+    except (SettingsBackendError, SnapshotError) as error:
+        print(f"Could not create snapshot: {error}")
+        return 1
+
+    print("Cinnameleon snapshot")
+    print("=" * 32)
+    print(f"Created : {snapshot.created_at}")
+    print(f"Settings: {len(snapshot.settings)}")
+    print(f"Saved to: {snapshot_path}")
+
+    return 0
+
+def _handle_restore(arguments: argparse.Namespace) -> int:
+    """Restore appearance settings from a saved snapshot."""
+
+    backend = SettingsBackend()
+    store = SnapshotStore()
+
+    try:
+        snapshot = store.load(arguments.snapshot)
+
+        changes = backend.plan_snapshot_restore(
+            snapshot,
+            include_cinnamon_theme=(
+                arguments.include_cinnamon_theme
+            ),
+        )
+    except (SettingsBackendError, SnapshotError) as error:
+        print(f"Could not prepare snapshot restore: {error}")
+        return 1
+
+    print("Cinnameleon restore")
+    print("=" * 32)
+    print(f"Snapshot created: {snapshot.created_at}")
+
+    _print_change_plan(changes)
+
+    if not arguments.include_cinnamon_theme:
+        print()
+        print(
+            "! Cinnamon theme was skipped for session safety."
+        )
+        print(
+            "  Use --include-cinnamon-theme to restore it."
+        )
+
+    required_count = sum(
+        change.requires_update
+        for change in changes
+    )
+
+    print()
+
+    if arguments.dry_run:
+        print(
+            "Dry run complete: "
+            f"{required_count} setting(s) would change."
+        )
+        return 0
+
+    if required_count == 0:
+        print("No changes are required.")
+        return 0
+
+    try:
+        applied = backend.apply_changes(changes)
+    except SettingsBackendError as error:
+        print(f"Failed to restore snapshot: {error}")
+        return 1
+
+    print(
+        f"Restored {len(applied)} setting change(s) successfully."
+    )
+
+    return 0
 
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
@@ -437,6 +544,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     apply_parser.set_defaults(handler=_handle_apply)
+
+    snapshot_parser = subcommands.add_parser(
+        "snapshot",
+        help="Save the current desktop appearance state.",
+    )
+    snapshot_parser.add_argument(
+        "--output",
+        type=Path,
+        help=(
+            "Optional output path. Defaults to the latest "
+            "snapshot in the XDG state directory."
+        ),
+    )
+    snapshot_parser.set_defaults(handler=_handle_snapshot)
+
+    restore_parser = subcommands.add_parser(
+        "restore",
+        help="Restore the most recent appearance snapshot.",
+    )
+    restore_parser.add_argument(
+        "--snapshot",
+        type=Path,
+        help=(
+            "Snapshot file to restore. Defaults to the "
+            "most recent safety snapshot."
+        ),
+    )
+    restore_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the restoration plan without changing settings.",
+    )
+    restore_parser.add_argument(
+        "--include-cinnamon-theme",
+        action="store_true",
+        help=(
+            "Also restore the Cinnamon shell theme. "
+            "This may reload the current Cinnamon session."
+        ),
+    )
+    restore_parser.set_defaults(handler=_handle_restore)
 
     return parser
 

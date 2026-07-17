@@ -15,6 +15,11 @@ from gi.repository import Gio
 
 from cinnameleon.models import EffectiveProfile
 
+from cinnameleon.snapshot import (
+    SettingsSnapshot,
+    SnapshotEntry,
+)
+
 
 BACKGROUND_SCHEMA = "org.cinnamon.desktop.background"
 INTERFACE_SCHEMA = "org.cinnamon.desktop.interface"
@@ -53,6 +58,67 @@ class SettingChange:
 
         return self.current_value != self.target_value
 
+@dataclass(frozen=True)
+class ManagedSetting:
+    """A GSettings key managed by Cinnameleon."""
+
+    label: str
+    schema_id: str
+    key: str
+
+MANAGED_SETTINGS = (
+    ManagedSetting(
+        label="GTK theme",
+        schema_id=INTERFACE_SCHEMA,
+        key="gtk-theme",
+    ),
+    ManagedSetting(
+        label="Window borders",
+        schema_id=WINDOW_MANAGER_SCHEMA,
+        key="theme",
+    ),
+    ManagedSetting(
+        label="Icon theme",
+        schema_id=INTERFACE_SCHEMA,
+        key="icon-theme",
+    ),
+    ManagedSetting(
+        label="Cursor theme",
+        schema_id=INTERFACE_SCHEMA,
+        key="cursor-theme",
+    ),
+    ManagedSetting(
+        label="Interface font",
+        schema_id=INTERFACE_SCHEMA,
+        key="font-name",
+    ),
+    ManagedSetting(
+        label="Document font",
+        schema_id=GNOME_INTERFACE_SCHEMA,
+        key="document-font-name",
+    ),
+    ManagedSetting(
+        label="Monospace font",
+        schema_id=GNOME_INTERFACE_SCHEMA,
+        key="monospace-font-name",
+    ),
+    ManagedSetting(
+        label="Window title font",
+        schema_id=WINDOW_MANAGER_SCHEMA,
+        key="titlebar-font",
+    ),
+    ManagedSetting(
+        label="Wallpaper",
+        schema_id=BACKGROUND_SCHEMA,
+        key="picture-uri",
+    ),
+    # Deliberately last because it reloads the Cinnamon shell.
+    ManagedSetting(
+        label="Cinnamon theme",
+        schema_id=CINNAMON_THEME_SCHEMA,
+        key="name",
+    ),
+)
 
 def _wallpaper_uri(path: Path) -> str:
     """Convert a local wallpaper path into a file URI."""
@@ -95,13 +161,6 @@ def build_setting_targets(
         "gtk-theme",
         appearance.gtk_theme,
     )
-    if include_cinnamon_theme:
-        add(
-            "Cinnamon theme",
-            CINNAMON_THEME_SCHEMA,
-            "name",
-            appearance.cinnamon_theme,
-        )
     add(
         "Window borders",
         WINDOW_MANAGER_SCHEMA,
@@ -152,6 +211,14 @@ def build_setting_targets(
         "picture-uri",
         _wallpaper_uri(profile.wallpaper),
     )
+
+    if include_cinnamon_theme:
+        add(
+            "Cinnamon theme",
+            CINNAMON_THEME_SCHEMA,
+            "name",
+            appearance.cinnamon_theme,
+        )
 
     return tuple(targets)
 
@@ -248,6 +315,97 @@ class SettingsBackend:
                     key=target.key,
                     current_value=current_value,
                     target_value=target.value,
+                )
+            )
+
+        return tuple(changes)
+    
+    def capture_snapshot(self) -> SettingsSnapshot:
+        """Capture all settings managed by Cinnameleon."""
+
+        entries = tuple(
+            SnapshotEntry(
+                label=setting.label,
+                schema_id=setting.schema_id,
+                key=setting.key,
+                value=self.read_string(
+                    setting.schema_id,
+                    setting.key,
+                ),
+            )
+            for setting in MANAGED_SETTINGS
+        )
+
+        return SettingsSnapshot.create(entries)
+
+    def plan_snapshot_restore(
+        self,
+        snapshot: SettingsSnapshot,
+        *,
+        include_cinnamon_theme: bool = False,
+    ) -> tuple[SettingChange, ...]:
+        """Compare a stored snapshot with the current system."""
+
+        managed_by_key = {
+            (setting.schema_id, setting.key): setting
+            for setting in MANAGED_SETTINGS
+        }
+
+        snapshot_values: dict[tuple[str, str], str] = {}
+
+        for entry in snapshot.settings:
+            entry_key = (entry.schema_id, entry.key)
+
+            if entry_key not in managed_by_key:
+                raise SettingsBackendError(
+                    "Snapshot contains an unmanaged setting: "
+                    f"{entry.schema_id}.{entry.key}"
+                )
+
+            snapshot_values[entry_key] = entry.value
+
+        missing_settings = [
+            setting
+            for setting in MANAGED_SETTINGS
+            if (
+                setting.schema_id,
+                setting.key,
+            ) not in snapshot_values
+        ]
+
+        if missing_settings:
+            missing = missing_settings[0]
+
+            raise SettingsBackendError(
+                "Snapshot is missing a managed setting: "
+                f"{missing.schema_id}.{missing.key}"
+            )
+
+        changes: list[SettingChange] = []
+
+        for setting in MANAGED_SETTINGS:
+            if (
+                setting.schema_id == CINNAMON_THEME_SCHEMA
+                and not include_cinnamon_theme
+            ):
+                continue
+
+            target_value = snapshot_values[
+                (setting.schema_id, setting.key)
+            ]
+
+            current_value = self.read_string(
+                setting.schema_id,
+                setting.key,
+            )
+
+            changes.append(
+                SettingChange(
+                    label=setting.label,
+                    schema_id=setting.schema_id,
+                    key=setting.key,
+                    current_value=current_value,
+                    target_value=target_value,
                 )
             )
 
