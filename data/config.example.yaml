@@ -1,0 +1,33 @@
+wallpaper_directory: /usr/share/backgrounds/linuxmint
+
+defaults:
+  gtk_theme:
+    dark: Flat-Remix-GTK-Teal-Dark-Solid
+    light: Mint-Y
+
+  cinnamon_theme:
+    dark: Flat-Remix-GTK-Teal-Dark
+    light: Mint-Y
+
+  window_borders:
+    dark: Mint-Y
+    light: Mint-Y
+
+  icon_theme:
+    dark: Flat-Remix-Teal-Dark
+    light: Mint-Y
+
+  cursor_theme:
+    dark: Moga-Light-Blue
+    light: Moga-Light-Blue
+
+  fonts:
+    interface: "Oxygen 10"
+    document: "Sans 10"
+    monospace: "Space Mono 10"
+    window_title: "Oxygen Bold 10"
+
+profiles:
+  - id: current
+    name: Current setup
+    wallpaper: sele_ring_center.jpg

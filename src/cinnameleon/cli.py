@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from pathlib import Path
 
 from cinnameleon import __version__
+from cinnameleon.config import (
+    load_configuration,
+    resolve_config_path,
+)
 from cinnameleon.inspector import print_inspection
+from cinnameleon.models import IssueLevel
 
 
 def _handle_inspect(_: argparse.Namespace) -> int:
@@ -14,6 +20,53 @@ def _handle_inspect(_: argparse.Namespace) -> int:
 
     print_inspection()
     return 0
+
+
+def _handle_check(arguments: argparse.Namespace) -> int:
+    """Load and validate the YAML configuration."""
+
+    config_path = resolve_config_path(arguments.config)
+    result = load_configuration(config_path)
+
+    print("Cinnameleon configuration check")
+    print("=" * 32)
+    print(f"Configuration : {config_path}")
+
+    if result.config is not None:
+        print("Status        : Valid")
+        print(f"Profiles      : {len(result.config.profiles)}")
+        print(
+            "Wallpaper dir : "
+            f"{result.config.wallpaper_directory}"
+        )
+
+        print()
+
+        for profile in result.config.profiles:
+            print(f"✓ {profile.id}")
+            print(f"  Name      : {profile.name}")
+            print(f"  Wallpaper : {profile.wallpaper}")
+    else:
+        print("Status        : Invalid")
+
+    if result.issues:
+        print()
+        print("Issues")
+        print("-" * 32)
+
+        for issue in result.issues:
+            marker = (
+                "✗"
+                if issue.level is IssueLevel.ERROR
+                else "!"
+            )
+
+            print(
+                f"{marker} [{issue.level.value}] "
+                f"{issue.location}: {issue.message}"
+            )
+
+    return 1 if result.has_errors else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +96,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show the current Cinnamon appearance settings.",
     )
     inspect_parser.set_defaults(handler=_handle_inspect)
+
+    check_parser = subcommands.add_parser(
+        "check",
+        help="Validate the Cinnameleon YAML configuration.",
+    )
+    check_parser.add_argument(
+        "--config",
+        type=Path,
+        help=(
+            "Configuration file path. Defaults to "
+            "~/.config/cinnameleon/config.yaml."
+        ),
+    )
+    check_parser.set_defaults(handler=_handle_check)
 
     return parser
 
