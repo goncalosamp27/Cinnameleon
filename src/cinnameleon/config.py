@@ -634,6 +634,26 @@ def load_configuration(
             if profile is not None:
                 profiles.append(profile)
 
+    wallpaper_owners: dict[Path, str] = {}
+
+    for index, profile in enumerate(profiles):
+        previous_profile = wallpaper_owners.get(
+            profile.wallpaper
+        )
+
+        if previous_profile is not None:
+            _add_error(
+                issues,
+                f"profiles[{index}].wallpaper",
+                (
+                    "Wallpaper is already assigned to profile "
+                    f"{previous_profile!r}: {profile.wallpaper}"
+                ),
+            )
+            continue
+
+        wallpaper_owners[profile.wallpaper] = profile.id
+
     if not profiles:
         _add_error(
             issues,

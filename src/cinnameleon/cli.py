@@ -34,6 +34,7 @@ from cinnameleon.snapshot import (
     SnapshotError,
     SnapshotStore,
 )
+from cinnameleon.watcher import WallpaperWatcher
 
 
 def _handle_inspect(_: argparse.Namespace) -> int:
@@ -441,6 +442,44 @@ def _handle_restore(arguments: argparse.Namespace) -> int:
 
     return 0
 
+def _handle_watch(arguments: argparse.Namespace) -> int:
+    """Watch wallpaper changes and synchronize profiles."""
+
+    config_path = resolve_config_path(arguments.config)
+
+    configuration, issues = _load_validated_configuration(
+        config_path
+    )
+
+    if configuration is None:
+        print(
+            "Cannot start watcher: "
+            "configuration is invalid."
+        )
+        _print_issues(issues)
+        return 1
+
+    watcher = WallpaperWatcher(
+        configuration=configuration,
+        mode=Mode(arguments.mode),
+    )
+
+    print("Cinnameleon wallpaper watcher")
+    print("=" * 32)
+    print(f"Configuration : {config_path}")
+    print(f"Profiles      : {len(configuration.profiles)}")
+    print(
+        "Cinnamon theme: skipped for session safety"
+    )
+    print("Stop          : Ctrl+C")
+    print()
+
+    watcher.start(
+        synchronize_initial=not arguments.no_initial_sync
+    )
+
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
 
@@ -584,7 +623,43 @@ def build_parser() -> argparse.ArgumentParser:
             "This may reload the current Cinnamon session."
         ),
     )
+
     restore_parser.set_defaults(handler=_handle_restore)
+
+    watch_parser = subcommands.add_parser(
+        "watch",
+        help=(
+            "Watch wallpaper changes and automatically "
+            "synchronize appearance profiles."
+        ),
+    )
+
+    watch_parser.add_argument(
+        "--mode",
+        choices=tuple(mode.value for mode in Mode),
+        default=Mode.DARK.value,
+        help="Appearance mode. Defaults to dark.",
+    )
+
+    watch_parser.add_argument(
+        "--config",
+        type=Path,
+        help=(
+            "Configuration file path. Defaults to "
+            "~/.config/cinnameleon/config.yaml."
+        ),
+    )
+
+    watch_parser.add_argument(
+        "--no-initial-sync",
+        action="store_true",
+        help=(
+            "Wait for the next wallpaper change instead "
+            "of synchronizing immediately."
+        ),
+    )
+
+    watch_parser.set_defaults(handler=_handle_watch)
 
     return parser
 
