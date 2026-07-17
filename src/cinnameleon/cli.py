@@ -14,6 +14,10 @@ from cinnameleon.config import (
 from cinnameleon.inspector import print_inspection
 from cinnameleon.models import IssueLevel
 
+from cinnameleon.validator import (
+    validate_configuration_resources,
+)
+
 
 def _handle_inspect(_: argparse.Namespace) -> int:
     """Handle the inspect subcommand."""
@@ -28,12 +32,28 @@ def _handle_check(arguments: argparse.Namespace) -> int:
     config_path = resolve_config_path(arguments.config)
     result = load_configuration(config_path)
 
+    issues = list(result.issues)
+
+    if result.config is not None:
+        resource_issues = validate_configuration_resources(
+            result.config
+        )
+        issues.extend(resource_issues)
+
+    has_errors = any(
+        issue.level is IssueLevel.ERROR
+        for issue in issues
+    )
+
     print("Cinnameleon configuration check")
     print("=" * 32)
     print(f"Configuration : {config_path}")
+    print(
+        "Status        : "
+        f"{'Invalid' if has_errors else 'Valid'}"
+    )
 
     if result.config is not None:
-        print("Status        : Valid")
         print(f"Profiles      : {len(result.config.profiles)}")
         print(
             "Wallpaper dir : "
@@ -46,15 +66,13 @@ def _handle_check(arguments: argparse.Namespace) -> int:
             print(f"✓ {profile.id}")
             print(f"  Name      : {profile.name}")
             print(f"  Wallpaper : {profile.wallpaper}")
-    else:
-        print("Status        : Invalid")
 
-    if result.issues:
+    if issues:
         print()
         print("Issues")
         print("-" * 32)
 
-        for issue in result.issues:
+        for issue in issues:
             marker = (
                 "✗"
                 if issue.level is IssueLevel.ERROR
@@ -66,7 +84,7 @@ def _handle_check(arguments: argparse.Namespace) -> int:
                 f"{issue.location}: {issue.message}"
             )
 
-    return 1 if result.has_errors else 0
+    return 1 if has_errors else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
