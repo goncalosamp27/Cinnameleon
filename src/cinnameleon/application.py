@@ -61,6 +61,7 @@ class CinnameleonApplication(Gtk.Application):
         )
 
         self._configuration: Configuration | None = None
+        self._current_profile: Profile | None = None
         self._watcher: WallpaperWatcher | None = None
         self._config_monitor: Gio.FileMonitor | None = None
         self._tray: TrayIcon | None = None
@@ -81,6 +82,10 @@ class CinnameleonApplication(Gtk.Application):
 
         self._tray = TrayIcon(
             config_path=self._config_path,
+            on_profile_selected=(
+                self._on_tray_profile_selected
+            ),
+            on_mode_changed=self._on_tray_mode_changed,
             on_reload=self._on_tray_reload,
             on_open_config=self._open_config_folder,
             on_quit=self.quit,
@@ -88,6 +93,74 @@ class CinnameleonApplication(Gtk.Application):
 
         self._start_config_monitor()
         self._reload_configuration(initial=True)
+
+    def _refresh_tray(
+        self,
+        *,
+        config_valid: bool = True,
+    ) -> None:
+        """Refresh the tray from the current application state."""
+
+        if self._tray is None:
+            return
+
+        profiles = (
+            self._configuration.profiles
+            if self._configuration is not None
+            else ()
+        )
+
+        self._tray.update_status(
+            profiles=profiles,
+            current_profile=self._current_profile,
+            mode=self._mode,
+            config_valid=config_valid,
+        )
+
+    def _on_tray_profile_selected(
+        self,
+        profile_id: str,
+    ) -> None:
+        """Apply a profile selected from the tray."""
+
+        if self._watcher is None:
+            self._logger.warning(
+                "Profile selection ignored: "
+                "watcher is unavailable"
+            )
+            return
+
+        self._logger.info(
+            "Profile selected from tray: %s",
+            profile_id,
+        )
+
+        self._watcher.apply_profile(profile_id)
+
+    def _on_tray_mode_changed(
+        self,
+        mode: Mode,
+    ) -> None:
+        """Change the global mode from the tray."""
+
+        if mode is self._mode:
+            return
+
+        self._logger.info(
+            "Mode selected from tray: %s",
+            mode.value,
+        )
+
+        self._mode = mode
+
+        if self._watcher is None:
+            self._refresh_tray()
+            return
+
+        self._watcher.set_mode(
+            mode,
+            synchronize_current=True,
+        )
 
         def _on_tray_reload(self) -> None:
             """Reload configuration from the tray menu."""
@@ -113,33 +186,6 @@ class CinnameleonApplication(Gtk.Application):
                     "Could not open configuration folder: %s",
                     error,
                 )
-
-        def _on_profile_state_changed(
-            self,
-            profile: Profile | None,
-            mode: Mode,
-        ) -> None:
-            """Update the tray after profile synchronization."""
-
-            if self._tray is None:
-                return
-
-            self._tray.update_status(
-                profile=profile,
-                mode=mode,
-                config_valid=True,
-            )
-
-        self._reload_configuration(initial=True)
-
-        self._logger.info(
-            "Cinnameleon application started"
-        )
-        self._logger.info(
-            "Configuration: %s",
-            self._config_path,
-        )
-        self._logger.info("Mode: %s", self._mode.value)
 
     def do_activate(self) -> None:
         """Activate the existing or newly started instance."""
@@ -234,16 +280,12 @@ class CinnameleonApplication(Gtk.Application):
         profile: Profile | None,
         mode: Mode,
     ) -> None:
-        """Update the tray after profile synchronization."""
+        """Update application and tray state."""
 
-        if self._tray is None:
-            return
+        self._current_profile = profile
+        self._mode = mode
 
-        self._tray.update_status(
-            profile=profile,
-            mode=mode,
-            config_valid=True,
-        )
+        self._refresh_tray(config_valid=True)
 
     def _start_config_monitor(self) -> None:
         """Monitor the configuration directory for file changes."""
@@ -403,11 +445,8 @@ class CinnameleonApplication(Gtk.Application):
                 self._configuration is None
                 and self._tray is not None
             ):
-                self._tray.update_status(
-                    profile=None,
-                    mode=self._mode,
-                    config_valid=False,
-                )
+                self._current_profile = None
+                self._refresh_tray(config_valid=False)
             if self._configuration is None:
                 self._logger.error(
                     "No valid configuration is available"
@@ -420,7 +459,23 @@ class CinnameleonApplication(Gtk.Application):
 
             return False
 
+        current_profile_id = (
+            self._current_profile.id
+            if self._current_profile is not None
+            else None
+        )
+        
         self._configuration = configuration
+
+        if current_profile_id is not None:
+            self._current_profile = next(
+                (
+                    profile
+                    for profile in configuration.profiles
+                    if profile.id == current_profile_id
+                ),
+                None,
+            )
 
         if self._watcher is None:
             self._watcher = WallpaperWatcher(
@@ -450,4 +505,6 @@ class CinnameleonApplication(Gtk.Application):
             len(configuration.profiles),
         )
 
+        self._refresh_tray(config_valid=True)
+        
         return True

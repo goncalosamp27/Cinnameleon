@@ -1,4 +1,4 @@
-"""Native Cinnamon tray icon using XAppStatusIcon."""
+"""Native interactive Cinnamon tray icon using XAppStatusIcon."""
 
 from __future__ import annotations
 
@@ -19,20 +19,26 @@ STATUS_ICON_NAME = "io.github.goncalosamp27.cinnameleon"
 DEFAULT_ICON_NAME = "preferences-desktop-theme-symbolic"
 
 ActionCallback = Callable[[], None]
+ProfileSelectedCallback = Callable[[str], None]
+ModeChangedCallback = Callable[[Mode], None]
 
 
 class TrayIcon:
-    """Cinnameleon status icon and tray menu."""
+    """Cinnameleon status icon and interactive tray menu."""
 
     def __init__(
         self,
         *,
         config_path: Path,
+        on_profile_selected: ProfileSelectedCallback,
+        on_mode_changed: ModeChangedCallback,
         on_reload: ActionCallback,
         on_open_config: ActionCallback,
         on_quit: ActionCallback,
     ) -> None:
         self._config_path = config_path
+        self._on_profile_selected = on_profile_selected
+        self._on_mode_changed = on_mode_changed
         self._on_reload = on_reload
         self._on_open_config = on_open_config
         self._on_quit = on_quit
@@ -45,7 +51,8 @@ class TrayIcon:
         self._status_icon.set_visible(True)
 
         self.update_status(
-            profile=None,
+            profiles=(),
+            current_profile=None,
             mode=Mode.DARK,
             config_valid=False,
         )
@@ -79,39 +86,122 @@ class TrayIcon:
 
         return Gtk.SeparatorMenuItem()
 
+    def _build_profile_submenu(
+        self,
+        profiles: tuple[Profile, ...],
+        current_profile: Profile | None,
+        *,
+        sensitive: bool,
+    ) -> Gtk.MenuItem:
+        """Create the profile selection submenu."""
+
+        parent_item = Gtk.MenuItem(label="Theme profile")
+        submenu = Gtk.Menu()
+
+        first_radio_item: Gtk.RadioMenuItem | None = None
+
+        for profile in profiles:
+            if first_radio_item is None:
+                radio_item = Gtk.RadioMenuItem.new_with_label(
+                    None,
+                    profile.name,
+                )
+                first_radio_item = radio_item
+            else:
+                radio_item = (
+                    Gtk.RadioMenuItem.new_with_label_from_widget(
+                        first_radio_item,
+                        profile.name,
+                    )
+                )
+
+            is_current = (
+                current_profile is not None
+                and current_profile.id == profile.id
+            )
+
+            # Set the initial state before connecting the signal.
+            radio_item.set_active(is_current)
+
+            radio_item.connect(
+                "toggled",
+                self._handle_profile_toggled,
+                profile.id,
+            )
+
+            submenu.append(radio_item)
+
+        if not profiles:
+            submenu.append(
+                self._disabled_item(
+                    "No valid profiles available"
+                )
+            )
+
+        parent_item.set_submenu(submenu)
+        parent_item.set_sensitive(
+            sensitive and bool(profiles)
+        )
+
+        return parent_item
+
     def update_status(
         self,
         *,
-        profile: Profile | None,
+        profiles: tuple[Profile, ...],
+        current_profile: Profile | None,
         mode: Mode,
         config_valid: bool,
     ) -> None:
-        """Rebuild the tray menu using the current application state."""
+        """Rebuild the tray menu using current application state."""
 
         menu = Gtk.Menu()
 
-        title_item = self._disabled_item("Cinnameleon")
-        menu.append(title_item)
+        menu.append(
+            self._disabled_item("Cinnameleon")
+        )
 
         menu.append(self._separator())
 
-        current_title = self._disabled_item("Current profile")
-        menu.append(current_title)
+        menu.append(
+            self._disabled_item("Current profile")
+        )
 
         if not config_valid:
-            profile_label = "⚠ Invalid configuration"
-        elif profile is None:
-            profile_label = "No matching profile"
+            current_label = "⚠ Invalid configuration"
+        elif current_profile is None:
+            current_label = "No matching profile"
         else:
-            profile_label = f"✓ {profile.name}"
+            current_label = f"✓ {current_profile.name}"
 
-        profile_item = self._disabled_item(profile_label)
-        menu.append(profile_item)
-
-        mode_item = self._disabled_item(
-            f"Mode: {mode.value.capitalize()}"
+        menu.append(
+            self._disabled_item(current_label)
         )
-        menu.append(mode_item)
+
+        menu.append(self._separator())
+
+        profile_submenu = self._build_profile_submenu(
+            profiles,
+            current_profile,
+            sensitive=config_valid,
+        )
+        menu.append(profile_submenu)
+
+        dark_mode_item = Gtk.CheckMenuItem(
+            label="Dark mode"
+        )
+
+        # Connect only after defining the current state,
+        # avoiding a callback during menu construction.
+        dark_mode_item.set_active(mode is Mode.DARK)
+        dark_mode_item.set_sensitive(config_valid)
+
+        dark_mode_item.connect(
+            "toggled",
+            self._handle_mode_toggled,
+        )
+
+        menu.append(dark_mode_item)
 
         menu.append(self._separator())
 
@@ -149,9 +239,9 @@ class TrayIcon:
 
         self._menu = menu
 
-        if profile is not None:
+        if current_profile is not None:
             tooltip = (
-                f"Cinnameleon — {profile.name} "
+                f"Cinnameleon — {current_profile.name} "
                 f"({mode.value})"
             )
         elif config_valid:
@@ -160,6 +250,33 @@ class TrayIcon:
             tooltip = "Cinnameleon — Invalid configuration"
 
         self._status_icon.set_tooltip_text(tooltip)
+
+    def _handle_profile_toggled(
+        self,
+        item: Gtk.RadioMenuItem,
+        profile_id: str,
+    ) -> None:
+        """Apply the newly selected profile."""
+
+        # A radio item also emits toggled when it becomes inactive.
+        if not item.get_active():
+            return
+
+        self._on_profile_selected(profile_id)
+
+    def _handle_mode_toggled(
+        self,
+        item: Gtk.CheckMenuItem,
+    ) -> None:
+        """Change between global dark and light mode."""
+
+        mode = (
+            Mode.DARK
+            if item.get_active()
+            else Mode.LIGHT
+        )
+
+        self._on_mode_changed(mode)
 
     def _handle_reload(
         self,
