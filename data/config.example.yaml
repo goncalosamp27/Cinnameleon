@@ -1,4 +1,4 @@
-wallpaper_directory: /usr/share/backgrounds/linuxmint
+wallpaper_directory: ~/Pictures/Cinnameleon
 
 defaults:
   gtk_theme:
@@ -30,4 +30,20 @@ defaults:
 profiles:
   - id: current
     name: Current setup
-    wallpaper: sele_ring_center.jpg
+    wallpaper: current.jpg
+
+  - id: gengar
+    name: Gengar
+    wallpaper: gengar.png
+
+    gtk_theme:
+      dark: Mint-Y-Dark
+      light: Mint-Y
+
+    window_borders:
+      dark: Mint-Y
+      light: Mint-Y
+
+    icon_theme:
+      dark: Mint-Y
+      light: Mint-Y
