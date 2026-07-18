@@ -21,11 +21,14 @@ from cinnameleon.models import (
     Configuration,
     IssueLevel,
     Mode,
+    Profile,
 )
 from cinnameleon.validator import (
     validate_configuration_resources,
 )
 from cinnameleon.watcher import WallpaperWatcher
+
+from cinnameleon.tray import TrayIcon
 
 
 APPLICATION_ID = "io.github.goncalosamp27.cinnameleon"
@@ -60,6 +63,7 @@ class CinnameleonApplication(Gtk.Application):
         self._configuration: Configuration | None = None
         self._watcher: WallpaperWatcher | None = None
         self._config_monitor: Gio.FileMonitor | None = None
+        self._tray: TrayIcon | None = None
 
         self._reload_source_id: int | None = None
         self._signal_source_ids: list[int] = []
@@ -74,7 +78,58 @@ class CinnameleonApplication(Gtk.Application):
         self._held = True
 
         self._install_unix_signal_handlers()
+
+        self._tray = TrayIcon(
+            config_path=self._config_path,
+            on_reload=self._on_tray_reload,
+            on_open_config=self._open_config_folder,
+            on_quit=self.quit,
+        )
+
         self._start_config_monitor()
+        self._reload_configuration(initial=True)
+
+        def _on_tray_reload(self) -> None:
+            """Reload configuration from the tray menu."""
+
+            self._logger.info(
+                "Manual configuration reload requested"
+            )
+            self._reload_configuration(initial=False)
+
+
+        def _open_config_folder(self) -> None:
+            """Open the configuration directory."""
+
+            uri = self._config_path.parent.as_uri()
+
+            try:
+                Gio.AppInfo.launch_default_for_uri(
+                    uri,
+                    None,
+                )
+            except GLib.Error as error:
+                self._logger.error(
+                    "Could not open configuration folder: %s",
+                    error,
+                )
+
+        def _on_profile_state_changed(
+            self,
+            profile: Profile | None,
+            mode: Mode,
+        ) -> None:
+            """Update the tray after profile synchronization."""
+
+            if self._tray is None:
+                return
+
+            self._tray.update_status(
+                profile=profile,
+                mode=mode,
+                config_valid=True,
+            )
+
         self._reload_configuration(initial=True)
 
         self._logger.info(
@@ -119,6 +174,10 @@ class CinnameleonApplication(Gtk.Application):
             self.release()
             self._held = False
 
+        if self._tray is not None:
+            self._tray.destroy()
+            self._tray = None
+
         Gtk.Application.do_shutdown(self)
 
     def _install_unix_signal_handlers(self) -> None:
@@ -144,6 +203,47 @@ class CinnameleonApplication(Gtk.Application):
         self.quit()
 
         return GLib.SOURCE_REMOVE
+    
+    def _on_tray_reload(self) -> None:
+        """Reload configuration from the tray menu."""
+
+        self._logger.info(
+            "Manual configuration reload requested"
+        )
+
+        self._reload_configuration(initial=False)
+
+    def _open_config_folder(self) -> None:
+        """Open the configuration directory."""
+
+        uri = self._config_path.parent.as_uri()
+
+        try:
+            Gio.AppInfo.launch_default_for_uri(
+                uri,
+                None,
+            )
+        except GLib.Error as error:
+            self._logger.error(
+                "Could not open configuration folder: %s",
+                error,
+            )
+
+    def _on_profile_state_changed(
+        self,
+        profile: Profile | None,
+        mode: Mode,
+    ) -> None:
+        """Update the tray after profile synchronization."""
+
+        if self._tray is None:
+            return
+
+        self._tray.update_status(
+            profile=profile,
+            mode=mode,
+            config_valid=True,
+        )
 
     def _start_config_monitor(self) -> None:
         """Monitor the configuration directory for file changes."""
@@ -299,6 +399,15 @@ class CinnameleonApplication(Gtk.Application):
         self._log_issues(issues)
 
         if configuration is None:
+            if (
+                self._configuration is None
+                and self._tray is not None
+            ):
+                self._tray.update_status(
+                    profile=None,
+                    mode=self._mode,
+                    config_valid=False,
+                )
             if self._configuration is None:
                 self._logger.error(
                     "No valid configuration is available"
@@ -318,6 +427,9 @@ class CinnameleonApplication(Gtk.Application):
                 configuration=configuration,
                 mode=self._mode,
                 on_message=self._logger.info,
+                on_state_changed=(
+                    self._on_profile_state_changed
+                ),
             )
 
             self._watcher.start_listening(

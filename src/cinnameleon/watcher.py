@@ -28,6 +28,7 @@ from cinnameleon.snapshot import (
 PICTURE_URI_KEY = "picture-uri"
 
 MessageHandler = Callable[[str], None]
+StateHandler = Callable[[Profile | None, Mode], None]
 
 
 def wallpaper_path_from_uri(uri: str) -> Path | None:
@@ -67,12 +68,14 @@ class WallpaperWatcher:
         backend: SettingsBackend | None = None,
         snapshot_store: SnapshotStore | None = None,
         on_message: MessageHandler = print,
+        on_state_changed: StateHandler | None = None,
     ) -> None:
         self._configuration = configuration
         self._mode = mode
         self._backend = backend or SettingsBackend()
         self._snapshot_store = snapshot_store or SnapshotStore()
         self._on_message = on_message
+        self._on_state_changed = on_state_changed
 
         self._profiles_by_wallpaper = build_wallpaper_index(
             configuration
@@ -91,6 +94,18 @@ class WallpaperWatcher:
         """Send a watcher status message."""
 
         self._on_message(message)
+
+    def _notify_state(
+        self,
+        profile: Profile | None,
+    ) -> None:
+        """Notify the application about the active profile."""
+
+        if self._on_state_changed is not None:
+            self._on_state_changed(
+                profile,
+                self._mode,
+            )
 
     @property
     def is_listening(self) -> bool:
@@ -170,6 +185,7 @@ class WallpaperWatcher:
             self._emit(
                 "Wallpaper has no supported local file path."
             )
+            self._notify_state(None)
             return False
 
         return self._synchronize_wallpaper(wallpaper)
@@ -203,6 +219,7 @@ class WallpaperWatcher:
                 "No profile matches wallpaper: "
                 f"{canonical_wallpaper}"
             )
+            self._notify_state(None)
             return False
 
         effective_profile = resolve_profile(
@@ -230,6 +247,7 @@ class WallpaperWatcher:
                     f"Profile already active: {profile.name} "
                     f"({self._mode.value})"
                 )
+                self._notify_state(profile)
                 return True
 
             snapshot = self._backend.capture_snapshot()
@@ -244,6 +262,8 @@ class WallpaperWatcher:
             self._emit(
                 f"Safety snapshot: {snapshot_path}"
             )
+
+            self._notify_state(profile)
 
             return True
 
@@ -274,6 +294,7 @@ class WallpaperWatcher:
                 "Wallpaper changed, but its URI is not "
                 "a supported local file."
             )
+            self._notify_state(None)
             return
 
         self._emit(f"Wallpaper changed: {wallpaper}")
