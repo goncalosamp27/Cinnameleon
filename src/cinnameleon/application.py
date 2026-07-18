@@ -30,6 +30,12 @@ from cinnameleon.watcher import WallpaperWatcher
 
 from cinnameleon.tray import TrayIcon
 
+from cinnameleon.state import (
+    ApplicationState,
+    StateError,
+    StateStore,
+)
+
 
 APPLICATION_ID = "io.github.goncalosamp27.cinnameleon"
 RELOAD_DELAY_MS = 300
@@ -69,6 +75,8 @@ class CinnameleonApplication(Gtk.Application):
         self._reload_source_id: int | None = None
         self._signal_source_ids: list[int] = []
         self._held = False
+
+        self._state_store = StateStore()
 
     def do_startup(self) -> None:
         """Initialize long-running application services."""
@@ -137,6 +145,25 @@ class CinnameleonApplication(Gtk.Application):
 
         self._watcher.apply_profile(profile_id)
 
+    def _save_runtime_state(self) -> None:
+        """Persist the current global mode."""
+
+        try:
+            state_path = self._state_store.save(
+                ApplicationState(mode=self._mode)
+            )
+        except StateError as error:
+            self._logger.warning(
+                "Could not save application state: %s",
+                error,
+            )
+            return
+
+        self._logger.debug(
+            "Application state saved: %s",
+            state_path,
+        )
+
     def _on_tray_mode_changed(
         self,
         mode: Mode,
@@ -152,6 +179,7 @@ class CinnameleonApplication(Gtk.Application):
         )
 
         self._mode = mode
+        self._save_runtime_state()
 
         if self._watcher is None:
             self._refresh_tray()

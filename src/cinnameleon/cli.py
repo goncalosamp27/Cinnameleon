@@ -39,6 +39,7 @@ from cinnameleon.watcher import WallpaperWatcher
 from cinnameleon.application import (
     CinnameleonApplication,
 )
+from cinnameleon.state import StateError, StateStore
 
 def _handle_inspect(_: argparse.Namespace) -> int:
     """Handle the inspect subcommand."""
@@ -488,9 +489,23 @@ def _handle_run(arguments: argparse.Namespace) -> int:
 
     config_path = resolve_config_path(arguments.config)
 
+    try:
+        saved_state = StateStore().load()
+    except StateError as error:
+        print(f"Warning: could not load saved state: {error}")
+        saved_mode = Mode.DARK
+    else:
+        saved_mode = saved_state.mode
+
+    mode = (
+        Mode(arguments.mode)
+        if arguments.mode is not None
+        else saved_mode
+    )
+
     application = CinnameleonApplication(
         config_path=config_path,
-        mode=Mode(arguments.mode),
+        mode=mode,
         synchronize_initial=(
             not arguments.no_initial_sync
         ),
@@ -500,7 +515,7 @@ def _handle_run(arguments: argparse.Namespace) -> int:
     print("Cinnameleon resident application")
     print("=" * 32)
     print(f"Configuration : {config_path}")
-    print(f"Mode          : {arguments.mode}")
+    print(f"Mode          : {mode.value}")
     print("Stop          : Ctrl+C")
     print()
 
@@ -698,8 +713,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--mode",
         choices=tuple(mode.value for mode in Mode),
-        default=Mode.DARK.value,
-        help="Appearance mode. Defaults to dark.",
+        default=None,
+        help=(
+            "Override the saved appearance mode for this startup. "
+            "Defaults to the previously selected mode."
+        ),
     )
 
     run_parser.add_argument(
