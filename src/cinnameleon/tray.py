@@ -16,7 +16,11 @@ from cinnameleon.models import Mode, Profile
 
 
 STATUS_ICON_NAME = "io.github.goncalosamp27.cinnameleon"
-DEFAULT_ICON_NAME = "preferences-desktop-theme-symbolic"
+TRAY_ICON_NAME = (
+    "io.github.goncalosamp27."
+    "cinnameleon-tray-symbolic"
+)
+FALLBACK_ICON_NAME = "preferences-desktop-theme-symbolic"
 
 ActionCallback = Callable[[], None]
 ProfileSelectedCallback = Callable[[str], None]
@@ -46,7 +50,9 @@ class TrayIcon:
         self._menu: Gtk.Menu | None = None
         self._status_icon = self._create_status_icon()
 
-        self._status_icon.set_icon_name(DEFAULT_ICON_NAME)
+        self._status_icon.set_icon_name(
+            self._resolve_icon_name()
+        )
         self._status_icon.set_tooltip_text("Cinnameleon")
         self._status_icon.set_visible(True)
 
@@ -56,6 +62,20 @@ class TrayIcon:
             mode=Mode.DARK,
             config_valid=False,
         )
+
+    @staticmethod
+    def _resolve_icon_name() -> str:
+        """Return the tray icon or a system fallback."""
+
+        icon_theme = Gtk.IconTheme.get_default()
+
+        if (
+            icon_theme is not None
+            and icon_theme.has_icon(TRAY_ICON_NAME)
+        ):
+            return TRAY_ICON_NAME
+
+        return FALLBACK_ICON_NAME
 
     @staticmethod
     def _create_status_icon() -> XApp.StatusIcon:
@@ -241,13 +261,13 @@ class TrayIcon:
 
         if current_profile is not None:
             tooltip = (
-                f"Cinnameleon — {current_profile.name} "
+                f"Cinnameleon: {current_profile.name} "
                 f"({mode.value})"
             )
         elif config_valid:
-            tooltip = "Cinnameleon — No matching profile"
+            tooltip = "Cinnameleon: No matching profile"
         else:
-            tooltip = "Cinnameleon — Invalid configuration"
+            tooltip = "Cinnameleon: Invalid configuration"
 
         self._status_icon.set_tooltip_text(tooltip)
 
