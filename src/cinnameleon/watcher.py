@@ -31,7 +31,7 @@ MessageHandler = Callable[[str], None]
 
 
 def wallpaper_path_from_uri(uri: str) -> Path | None:
-    """Convert a local file URI into a canonical wallpaper path."""
+    """Convert a local file URI into a canonical path."""
 
     if not uri:
         return None
@@ -92,6 +92,12 @@ class WallpaperWatcher:
 
         self._on_message(message)
 
+    @property
+    def is_listening(self) -> bool:
+        """Return whether the GSettings signal is connected."""
+
+        return self._signal_id is not None
+
     def current_wallpaper(self) -> Path | None:
         """Read the current wallpaper from Cinnamon."""
 
@@ -101,11 +107,55 @@ class WallpaperWatcher:
 
         return wallpaper_path_from_uri(uri)
 
+    def update_configuration(
+        self,
+        configuration: Configuration,
+        *,
+        synchronize_current: bool = True,
+    ) -> None:
+        """Replace the active configuration without restarting."""
+
+        self._configuration = configuration
+        self._profiles_by_wallpaper = build_wallpaper_index(
+            configuration
+        )
+
+        # Force re-evaluation because the profile definition may
+        # have changed while the wallpaper stayed the same.
+        self._last_wallpaper = None
+
+        self._emit(
+            "Configuration updated: "
+            f"{len(configuration.profiles)} profile(s)"
+        )
+
+        if synchronize_current:
+            self.synchronize_current_wallpaper()
+
+    def set_mode(
+        self,
+        mode: Mode,
+        *,
+        synchronize_current: bool = True,
+    ) -> None:
+        """Change the global appearance mode."""
+
+        if mode is self._mode:
+            return
+
+        self._mode = mode
+        self._last_wallpaper = None
+
+        self._emit(f"Mode changed: {mode.value}")
+
+        if synchronize_current:
+            self.synchronize_current_wallpaper()
+
     def _profile_for_wallpaper(
         self,
         wallpaper: Path,
     ) -> Profile | None:
-        """Find a profile matching a canonical wallpaper path."""
+        """Find a profile matching a wallpaper path."""
 
         return self._profiles_by_wallpaper.get(
             wallpaper.resolve()
@@ -229,16 +279,16 @@ class WallpaperWatcher:
         self._emit(f"Wallpaper changed: {wallpaper}")
         self._synchronize_wallpaper(wallpaper)
 
-    def start(
+    def start_listening(
         self,
         *,
         synchronize_initial: bool = True,
     ) -> None:
-        """Start listening to wallpaper changes."""
+        """Connect the wallpaper signal without starting a loop."""
 
-        if self._loop is not None:
+        if self._signal_id is not None:
             raise RuntimeError(
-                "Wallpaper watcher is already running."
+                "Wallpaper watcher is already listening."
             )
 
         self._signal_id = self._background_settings.connect(
@@ -246,11 +296,7 @@ class WallpaperWatcher:
             self._on_picture_uri_changed,
         )
 
-        # Gio.Settings only emits the detailed changed signal
-        # reliably after the key has been read while connected.
         initial_wallpaper = self.current_wallpaper()
-
-        self._loop = GLib.MainLoop()
 
         self._emit("Wallpaper watcher started.")
         self._emit(f"Mode: {self._mode.value}")
@@ -263,6 +309,37 @@ class WallpaperWatcher:
         if synchronize_initial:
             self.synchronize_current_wallpaper()
 
+    def stop_listening(self) -> None:
+        """Disconnect the wallpaper signal."""
+
+        if self._signal_id is None:
+            return
+
+        self._background_settings.disconnect(
+            self._signal_id
+        )
+        self._signal_id = None
+
+        self._emit("Wallpaper watcher stopped.")
+
+    def start(
+        self,
+        *,
+        synchronize_initial: bool = True,
+    ) -> None:
+        """Run the standalone command-line watcher."""
+
+        if self._loop is not None:
+            raise RuntimeError(
+                "Wallpaper watcher is already running."
+            )
+
+        self.start_listening(
+            synchronize_initial=synchronize_initial
+        )
+
+        self._loop = GLib.MainLoop()
+
         try:
             self._loop.run()
         except KeyboardInterrupt:
@@ -271,13 +348,9 @@ class WallpaperWatcher:
             self.stop()
 
     def stop(self) -> None:
-        """Stop the watcher and disconnect its signal."""
+        """Stop the standalone loop and disconnect signals."""
 
-        if self._signal_id is not None:
-            self._background_settings.disconnect(
-                self._signal_id
-            )
-            self._signal_id = None
+        self.stop_listening()
 
         if self._loop is not None:
             if self._loop.is_running():

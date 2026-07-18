@@ -36,6 +36,9 @@ from cinnameleon.snapshot import (
 )
 from cinnameleon.watcher import WallpaperWatcher
 
+from cinnameleon.application import (
+    CinnameleonApplication,
+)
 
 def _handle_inspect(_: argparse.Namespace) -> int:
     """Handle the inspect subcommand."""
@@ -480,6 +483,29 @@ def _handle_watch(arguments: argparse.Namespace) -> int:
 
     return 0
 
+def _handle_run(arguments: argparse.Namespace) -> int:
+    """Run the resident single-instance application."""
+
+    config_path = resolve_config_path(arguments.config)
+
+    application = CinnameleonApplication(
+        config_path=config_path,
+        mode=Mode(arguments.mode),
+        synchronize_initial=(
+            not arguments.no_initial_sync
+        ),
+        verbose=arguments.verbose,
+    )
+
+    print("Cinnameleon resident application")
+    print("=" * 32)
+    print(f"Configuration : {config_path}")
+    print(f"Mode          : {arguments.mode}")
+    print("Stop          : Ctrl+C")
+    print()
+
+    return application.run(["cinnameleon"])
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
 
@@ -660,6 +686,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     watch_parser.set_defaults(handler=_handle_watch)
+
+    run_parser = subcommands.add_parser(
+        "run",
+        help=(
+            "Run the resident single-instance "
+            "Cinnameleon application."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--mode",
+        choices=tuple(mode.value for mode in Mode),
+        default=Mode.DARK.value,
+        help="Appearance mode. Defaults to dark.",
+    )
+
+    run_parser.add_argument(
+        "--config",
+        type=Path,
+        help=(
+            "Configuration file path. Defaults to "
+            "~/.config/cinnameleon/config.yaml."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--no-initial-sync",
+        action="store_true",
+        help=(
+            "Do not synchronize the current wallpaper "
+            "when the application starts."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable debug-level logging.",
+    )
+
+    run_parser.set_defaults(handler=_handle_run)
 
     return parser
 
