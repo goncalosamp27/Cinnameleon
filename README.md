@@ -1,6 +1,6 @@
 # Cinnameleon
 
-Cinnameleon is a lightweight appearance profile manager for Linux Mint Cinnamon.
+> Lightweight appearance profile manager for Linux Mint Cinnamon.
 
 It was created from a simple frustration: changing the look of the desktop usually means configuring several things separately such as GTK themes, icons, cursors, fonts, terminal colors and wallpapers.
 
@@ -23,14 +23,6 @@ A Cinnameleon profile can control:
 Profiles are stored in a human-readable YAML configuration and can be managed through the Cinnameleon GUI or directly from the configuration file.
 
 Cinnameleon can also detect wallpaper changes and apply the corresponding appearance profile automatically.
-
-A tray icon provides quick access to:
-
-- Open the GUI
-- Switch profile
-- Toggle dark mode
-- Reload the configuration
-- Open the configuration folder
 
 ## Motivation
 
@@ -57,5 +49,34 @@ To install without automatic startup:
 ```bash
 bash scripts/install.sh --no-autostart
 ```
+
+## Instructions
+
+After installation, Cinnameleon starts automatically with the Cinnamon session and stays available from the tray icon.
+
+Open the GUI from the tray menu to create and edit appearance profiles.
+
+Each profile can define its own wallpaper, themes, icons, cursors, fonts and terminal palette, with separate light and dark variants.
+
+Cinnameleon stores its configuration in:
+
+```text
+~/.config/cinnameleon/config.yaml
+```
+
+You can edit this file directly if you prefer working with YAML.
+
+When a profile is applied, Cinnameleon updates the configured desktop appearance settings and keeps the active profile synchronized with the current wallpaper.
+
+From the tray menu you can quickly:
+
+- Open the GUI
+- Switch profile
+- Toggle dark mode
+- Reload the configuration
+- Open the configuration folder
+- Quit Cinnameleon
+
+## Status
 
 Cinnameleon is currently under development.
