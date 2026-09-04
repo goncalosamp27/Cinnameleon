@@ -41,12 +41,75 @@ from cinnameleon.application import (
 )
 from cinnameleon.state import StateError, StateStore
 
+from cinnameleon.resources import ResourceCatalog
+
 def _handle_inspect(_: argparse.Namespace) -> int:
     """Handle the inspect subcommand."""
 
     print_inspection()
     return 0
 
+def _print_resource_group(
+    title: str,
+    values: Sequence[str],
+) -> None:
+    """Print one discovered resource group."""
+
+    print()
+    print(f"{title} ({len(values)})")
+    print("-" * 32)
+
+    if not values:
+        print("(none found)")
+        return
+
+    for value in values:
+        print(f"• {value}")
+
+
+def _handle_resources(
+    arguments: argparse.Namespace,
+) -> int:
+    """List appearance resources available on the system."""
+
+    catalog = ResourceCatalog.discover(
+        refresh=arguments.refresh
+    )
+
+    print("Cinnameleon resources")
+    print("=" * 32)
+
+    _print_resource_group(
+        "GTK themes",
+        catalog.gtk_themes,
+    )
+
+    _print_resource_group(
+        "Cinnamon themes",
+        catalog.cinnamon_themes,
+    )
+
+    _print_resource_group(
+        "Window borders",
+        catalog.window_border_themes,
+    )
+
+    _print_resource_group(
+        "Icon themes",
+        catalog.icon_themes,
+    )
+
+    _print_resource_group(
+        "Cursor themes",
+        catalog.cursor_themes,
+    )
+
+    _print_resource_group(
+        "Font families",
+        catalog.font_families,
+    )
+
+    return 0
 
 def _print_issues(
     issues: Sequence[ConfigIssue],
@@ -487,13 +550,21 @@ def _handle_watch(arguments: argparse.Namespace) -> int:
 def _handle_run(arguments: argparse.Namespace) -> int:
     """Run the resident single-instance application."""
 
-    config_path = resolve_config_path(arguments.config)
+    config_path = resolve_config_path(
+        arguments.config
+    )
 
     try:
         saved_state = StateStore().load()
+
     except StateError as error:
-        print(f"Warning: could not load saved state: {error}")
+        print(
+            "Warning: could not load "
+            f"saved state: {error}"
+        )
+
         saved_mode = Mode.DARK
+
     else:
         saved_mode = saved_state.mode
 
@@ -509,17 +580,33 @@ def _handle_run(arguments: argparse.Namespace) -> int:
         synchronize_initial=(
             not arguments.no_initial_sync
         ),
+        show_window=arguments.show_window,
         verbose=arguments.verbose,
     )
 
-    print("Cinnameleon resident application")
+    print(
+        "Cinnameleon resident application"
+    )
+
     print("=" * 32)
-    print(f"Configuration : {config_path}")
-    print(f"Mode          : {mode.value}")
-    print("Stop          : Ctrl+C")
+
+    print(
+        f"Configuration : {config_path}"
+    )
+
+    print(
+        f"Mode          : {mode.value}"
+    )
+
+    print(
+        "Stop          : Ctrl+C"
+    )
+
     print()
 
-    return application.run(["cinnameleon"])
+    return application.run(
+        ["cinnameleon"]
+    )
 
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
@@ -548,6 +635,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show the current Cinnamon appearance settings.",
     )
     inspect_parser.set_defaults(handler=_handle_inspect)
+
+    resources_parser = subcommands.add_parser(
+        "resources",
+        help=(
+            "List themes, icons, cursors and fonts "
+            "available on this system."
+        ),
+    )
+
+    resources_parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh the resource discovery cache.",
+    )
+
+    resources_parser.set_defaults(
+        handler=_handle_resources
+    )
 
     check_parser = subcommands.add_parser(
         "check",
@@ -735,6 +840,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Do not synchronize the current wallpaper "
             "when the application starts."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--show-window",
+        action="store_true",
+        help=(
+            "Open the graphical profile editor. "
+            "If Cinnameleon is already running, "
+            "the request is forwarded to it."
         ),
     )
 

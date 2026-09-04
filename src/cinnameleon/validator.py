@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from functools import lru_cache
-from pathlib import Path
 from typing import Callable
 
 import gi
@@ -22,162 +20,16 @@ from cinnameleon.models import (
     IssueLevel,
     ThemeVariants,
 )
+from cinnameleon.resources import (
+    cinnamon_theme_exists,
+    cursor_theme_exists,
+    gtk_theme_exists,
+    icon_theme_exists,
+    window_border_theme_exists,
+)
 
 
 ResourceValidator = Callable[[str], bool]
-
-
-def _unique_paths(paths: list[Path]) -> tuple[Path, ...]:
-    """Return unique paths while preserving their original order."""
-
-    unique: list[Path] = []
-    seen: set[Path] = set()
-
-    for path in paths:
-        expanded = path.expanduser()
-
-        if expanded not in seen:
-            seen.add(expanded)
-            unique.append(expanded)
-
-    return tuple(unique)
-
-
-def _xdg_data_directories() -> tuple[Path, ...]:
-    """Return user and system XDG data directories."""
-
-    user_data_home = Path(
-        os.environ.get(
-            "XDG_DATA_HOME",
-            str(Path.home() / ".local" / "share"),
-        )
-    )
-
-    system_data_value = os.environ.get(
-        "XDG_DATA_DIRS",
-        "/usr/local/share:/usr/share",
-    )
-
-    system_data_directories = [
-        Path(value)
-        for value in system_data_value.split(":")
-        if value
-    ]
-
-    return _unique_paths(
-        [
-            user_data_home,
-            *system_data_directories,
-        ]
-    )
-
-
-def theme_directories() -> tuple[Path, ...]:
-    """Return locations that may contain desktop themes."""
-
-    return _unique_paths(
-        [
-            Path.home() / ".themes",
-            *(
-                directory / "themes"
-                for directory in _xdg_data_directories()
-            ),
-        ]
-    )
-
-
-def icon_directories() -> tuple[Path, ...]:
-    """Return locations that may contain icon and cursor themes."""
-
-    return _unique_paths(
-        [
-            Path.home() / ".icons",
-            *(
-                directory / "icons"
-                for directory in _xdg_data_directories()
-            ),
-        ]
-    )
-
-
-@lru_cache(maxsize=None)
-def gtk_theme_exists(name: str) -> bool:
-    """Return whether a GTK3 theme exists."""
-
-    for directory in theme_directories():
-        theme_directory = directory / name
-
-        if (theme_directory / "gtk-3.0" / "gtk.css").is_file():
-            return True
-
-    return False
-
-
-@lru_cache(maxsize=None)
-def cinnamon_theme_exists(name: str) -> bool:
-    """Return whether a Cinnamon shell theme exists."""
-
-    for directory in theme_directories():
-        theme_directory = directory / name
-
-        if (
-            theme_directory
-            / "cinnamon"
-            / "cinnamon.css"
-        ).is_file():
-            return True
-
-    return False
-
-
-@lru_cache(maxsize=None)
-def window_border_theme_exists(name: str) -> bool:
-    """Return whether a Metacity/Muffin window border theme exists."""
-
-    for directory in theme_directories():
-        metacity_directory = directory / name / "metacity-1"
-
-        if not metacity_directory.is_dir():
-            continue
-
-        if any(
-            metacity_directory.glob("metacity-theme-*.xml")
-        ):
-            return True
-
-    return False
-
-
-@lru_cache(maxsize=None)
-def icon_theme_exists(name: str) -> bool:
-    """Return whether an icon theme exists."""
-
-    for directory in icon_directories():
-        icon_directory = directory / name
-
-        if (
-            icon_directory.is_dir()
-            and (icon_directory / "index.theme").is_file()
-        ):
-            return True
-
-    return False
-
-
-@lru_cache(maxsize=None)
-def cursor_theme_exists(name: str) -> bool:
-    """Return whether a cursor theme exists."""
-
-    for directory in icon_directories():
-        cursor_directory = directory / name
-
-        if (
-            cursor_directory.is_dir()
-            and (cursor_directory / "cursors").is_dir()
-        ):
-            return True
-
-    return False
 
 
 def _normalize_font_family(value: str) -> str:
@@ -186,11 +38,15 @@ def _normalize_font_family(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def _font_family_from_description(description: str) -> str | None:
+def _font_family_from_description(
+    description: str,
+) -> str | None:
     """Extract the family from a Pango font description."""
 
-    font_description = Pango.FontDescription.from_string(
-        description
+    font_description = (
+        Pango.FontDescription.from_string(
+            description
+        )
     )
 
     family = font_description.get_family()
@@ -207,12 +63,16 @@ def _font_family_from_description(description: str) -> str | None:
 def font_exists(description: str) -> bool:
     """Return whether the requested font family is installed."""
 
-    family = _font_family_from_description(description)
+    family = _font_family_from_description(
+        description
+    )
 
     if family is None:
         return False
 
-    normalized_family = _normalize_font_family(family)
+    normalized_family = _normalize_font_family(
+        family
+    )
 
     generic_families = {
         "sans",
@@ -237,7 +97,10 @@ def font_exists(description: str) -> bool:
             text=True,
             timeout=3,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (
+        OSError,
+        subprocess.SubprocessError,
+    ):
         return False
 
     if result.returncode != 0:
@@ -252,9 +115,14 @@ def font_exists(description: str) -> bool:
             )
 
             if normalized:
-                matched_families.add(normalized)
+                matched_families.add(
+                    normalized
+                )
 
-    return normalized_family in matched_families
+    return (
+        normalized_family
+        in matched_families
+    )
 
 
 def _add_missing_resource_issue(
@@ -325,7 +193,9 @@ def _validate_fonts(
         if not font_exists(description):
             _add_missing_resource_issue(
                 issues=issues,
-                location=f"{location}.{font_type}",
+                location=(
+                    f"{location}.{font_type}"
+                ),
                 resource_type="Font",
                 resource_name=description,
             )
@@ -348,7 +218,9 @@ def _validate_appearance(
 
     _validate_variants(
         variants=appearance.cinnamon_theme,
-        location=f"{location}.cinnamon_theme",
+        location=(
+            f"{location}.cinnamon_theme"
+        ),
         resource_type="Cinnamon theme",
         validator=cinnamon_theme_exists,
         issues=issues,
@@ -356,9 +228,13 @@ def _validate_appearance(
 
     _validate_variants(
         variants=appearance.window_borders,
-        location=f"{location}.window_borders",
+        location=(
+            f"{location}.window_borders"
+        ),
         resource_type="Window border theme",
-        validator=window_border_theme_exists,
+        validator=(
+            window_border_theme_exists
+        ),
         issues=issues,
     )
 
@@ -398,13 +274,19 @@ def validate_configuration_resources(
         issues=issues,
     )
 
-    for index, profile in enumerate(config.profiles):
+    for index, profile in enumerate(
+        config.profiles
+    ):
         if not profile.wallpaper.is_file():
             _add_missing_resource_issue(
                 issues=issues,
-                location=f"profiles[{index}].wallpaper",
+                location=(
+                    f"profiles[{index}].wallpaper"
+                ),
                 resource_type="Wallpaper",
-                resource_name=str(profile.wallpaper),
+                resource_name=str(
+                    profile.wallpaper
+                ),
             )
 
         _validate_appearance(

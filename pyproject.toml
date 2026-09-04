@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "A lightweight theme profile manager for Linux Mint Cinnamon"
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+    "ruamel.yaml>=0.18,<0.19",
+]
 
 [project.scripts]
 cinnameleon = "cinnameleon.cli:main"
