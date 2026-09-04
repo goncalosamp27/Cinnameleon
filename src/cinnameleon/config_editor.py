@@ -17,6 +17,8 @@ from ruamel.yaml.comments import CommentedMap
 from cinnameleon.models import (
     Configuration,
     EffectiveProfile,
+    ANSI_COLOR_KEYS,
+    TerminalPalette,
 )
 from cinnameleon.resolver import resolve_profile
 
@@ -731,6 +733,43 @@ def change_profile_wallpaper(
 
     return True
 
+def _terminal_palette_mapping(
+    palette: TerminalPalette,
+) -> CommentedMap:
+    result = CommentedMap()
+
+    result["background"] = (
+        palette.background
+    )
+
+    result["foreground"] = (
+        palette.foreground
+    )
+
+    result["cursor"] = (
+        palette.cursor
+    )
+
+    result[
+        "selection_background"
+    ] = palette.selection_background
+
+    result[
+        "selection_foreground"
+    ] = palette.selection_foreground
+
+    ansi = CommentedMap()
+
+    for key, color in zip(
+        ANSI_COLOR_KEYS,
+        palette.ansi,
+        strict=True,
+    ):
+        ansi[key] = color
+
+    result["ansi"] = ansi
+
+    return result
 
 def save_profile_edits(
     configuration: Configuration,
@@ -865,6 +904,62 @@ def save_profile_edits(
             value,
         ) in changed_fonts.items():
             fonts[key] = value
+
+        changed = True
+
+    # ---------------------------------------------------------
+    # Terminal palette
+    # ---------------------------------------------------------
+
+    desired_terminal = (
+        desired.terminal_palette
+    )
+
+    resolved_terminal = (
+        resolved.terminal_palette
+    )
+
+    if (
+        desired_terminal
+        != resolved_terminal
+    ):
+        mode_key = (
+            desired.mode.value
+        )
+
+        if desired_terminal is None:
+            terminal = profile.get(
+                "terminal"
+            )
+
+            if isinstance(
+                terminal,
+                MutableMapping,
+            ):
+                terminal.pop(
+                    mode_key,
+                    None,
+                )
+
+                if not terminal:
+                    profile.pop(
+                        "terminal",
+                        None,
+                    )
+
+        else:
+            terminal = _ensure_mapping(
+                profile,
+                "terminal",
+            )
+
+            terminal[
+                mode_key
+            ] = (
+                _terminal_palette_mapping(
+                    desired_terminal
+                )
+            )
 
         changed = True
 

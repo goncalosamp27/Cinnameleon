@@ -1,4 +1,4 @@
-"""Native interactive Cinnamon tray icon using XAppStatusIcon."""
+"""Native Cinnamon tray icon using XAppStatusIcon."""
 
 from __future__ import annotations
 
@@ -7,17 +7,22 @@ from pathlib import Path
 
 import gi
 
+gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 gi.require_version("XApp", "1.0")
 
-from gi.repository import Gtk, XApp
+from gi.repository import Gdk, Gtk, XApp
 
 from cinnameleon.models import Mode, Profile
 
 
-STATUS_ICON_NAME = (
+APPLICATION_ID = (
     "io.github.goncalosamp27.cinnameleon"
 )
+
+STATUS_ICON_NAME = APPLICATION_ID
+
+APP_ICON_NAME = APPLICATION_ID
 
 TRAY_ICON_NAME = (
     "io.github.goncalosamp27."
@@ -28,30 +33,27 @@ FALLBACK_ICON_NAME = (
     "preferences-desktop-theme-symbolic"
 )
 
+
 ActionCallback = Callable[[], None]
 ProfileSelectedCallback = Callable[[str], None]
 ModeChangedCallback = Callable[[Mode], None]
 
 
 class TrayIcon:
-    """Cinnameleon status icon and menu."""
+    """Cinnameleon status icon and interactive tray menu."""
 
     def __init__(
         self,
         *,
         config_path: Path,
-        on_open_window: ActionCallback,
         on_profile_selected: ProfileSelectedCallback,
         on_mode_changed: ModeChangedCallback,
         on_reload: ActionCallback,
+        on_open_window: ActionCallback,
         on_open_config: ActionCallback,
         on_quit: ActionCallback,
     ) -> None:
         self._config_path = config_path
-
-        self._on_open_window = (
-            on_open_window
-        )
 
         self._on_profile_selected = (
             on_profile_selected
@@ -62,21 +64,37 @@ class TrayIcon:
         )
 
         self._on_reload = on_reload
-
-        self._on_open_config = (
-            on_open_config
-        )
-
+        self._on_open_window = on_open_window
+        self._on_open_config = on_open_config
         self._on_quit = on_quit
 
         self._menu: Gtk.Menu | None = None
+
+        # -----------------------------------------------------
+        # Application/window identity
+        #
+        # This makes Cinnamon associate Cinnameleon windows
+        # with the correct .desktop application and icon.
+        # -----------------------------------------------------
+
+        Gdk.set_program_class(
+            APPLICATION_ID
+        )
+
+        Gtk.Window.set_default_icon_name(
+            APP_ICON_NAME
+        )
+
+        # -----------------------------------------------------
+        # Tray
+        # -----------------------------------------------------
 
         self._status_icon = (
             self._create_status_icon()
         )
 
         self._status_icon.set_icon_name(
-            self._resolve_icon_name()
+            self._resolve_tray_icon_name()
         )
 
         self._status_icon.set_tooltip_text(
@@ -94,11 +112,15 @@ class TrayIcon:
             config_valid=False,
         )
 
+    # =========================================================
+    # Icons
+    # =========================================================
+
     @staticmethod
-    def _resolve_icon_name() -> str:
-        icon_theme = (
-            Gtk.IconTheme.get_default()
-        )
+    def _resolve_tray_icon_name() -> str:
+        """Return installed tray icon or system fallback."""
+
+        icon_theme = Gtk.IconTheme.get_default()
 
         if (
             icon_theme is not None
@@ -110,16 +132,20 @@ class TrayIcon:
 
         return FALLBACK_ICON_NAME
 
+    # =========================================================
+    # XApp
+    # =========================================================
+
     @staticmethod
-    def _create_status_icon(
-    ) -> XApp.StatusIcon:
+    def _create_status_icon() -> XApp.StatusIcon:
+        """Create native XApp status icon."""
+
         if hasattr(
             XApp.StatusIcon,
             "new_with_name",
         ):
             return (
-                XApp.StatusIcon
-                .new_with_name(
+                XApp.StatusIcon.new_with_name(
                     STATUS_ICON_NAME
                 )
             )
@@ -132,6 +158,10 @@ class TrayIcon:
 
         return icon
 
+    # =========================================================
+    # Menu helpers
+    # =========================================================
+
     @staticmethod
     def _disabled_item(
         label: str,
@@ -140,14 +170,19 @@ class TrayIcon:
             label=label
         )
 
-        item.set_sensitive(False)
+        item.set_sensitive(
+            False
+        )
 
         return item
 
     @staticmethod
-    def _separator(
-    ) -> Gtk.SeparatorMenuItem:
+    def _separator() -> Gtk.SeparatorMenuItem:
         return Gtk.SeparatorMenuItem()
+
+    # =========================================================
+    # Profile submenu
+    # =========================================================
 
     def _build_profile_submenu(
         self,
@@ -227,6 +262,10 @@ class TrayIcon:
 
         return parent_item
 
+    # =========================================================
+    # Tray menu
+    # =========================================================
+
     def update_status(
         self,
         *,
@@ -235,57 +274,36 @@ class TrayIcon:
         mode: Mode,
         config_valid: bool,
     ) -> None:
+        """Rebuild the tray menu."""
+
         menu = Gtk.Menu()
 
-        open_window = Gtk.MenuItem(
-            label="Open Cinnameleon"
+        # =========================================================
+        # Open GUI
+        # =========================================================
+
+        open_window_item = Gtk.MenuItem(
+            label="Open GUI"
         )
 
-        open_window.connect(
+        open_window_item.connect(
             "activate",
             self._handle_open_window,
         )
 
         menu.append(
-            open_window
+            open_window_item
         )
 
         menu.append(
             self._separator()
         )
 
-        menu.append(
-            self._disabled_item(
-                "Current profile"
-            )
-        )
+        # =========================================================
+        # Profile selector
+        # =========================================================
 
-        if not config_valid:
-            current_label = (
-                "⚠ Invalid configuration"
-            )
-
-        elif current_profile is None:
-            current_label = (
-                "No matching profile"
-            )
-
-        else:
-            current_label = (
-                f"✓ {current_profile.name}"
-            )
-
-        menu.append(
-            self._disabled_item(
-                current_label
-            )
-        )
-
-        menu.append(
-            self._separator()
-        )
-
-        menu.append(
+        profile_submenu = (
             self._build_profile_submenu(
                 profiles,
                 current_profile,
@@ -293,30 +311,47 @@ class TrayIcon:
             )
         )
 
-        dark_mode = Gtk.CheckMenuItem(
+        # Shorter, cleaner label.
+        profile_submenu.set_label(
+            "Profile"
+        )
+
+        menu.append(
+            profile_submenu
+        )
+
+        # =========================================================
+        # Dark / light mode
+        # =========================================================
+
+        dark_mode_item = Gtk.CheckMenuItem(
             label="Dark mode"
         )
 
-        dark_mode.set_active(
+        dark_mode_item.set_active(
             mode is Mode.DARK
         )
 
-        dark_mode.set_sensitive(
+        dark_mode_item.set_sensitive(
             config_valid
         )
 
-        dark_mode.connect(
+        dark_mode_item.connect(
             "toggled",
             self._handle_mode_toggled,
         )
 
         menu.append(
-            dark_mode
+            dark_mode_item
         )
 
         menu.append(
             self._separator()
         )
+
+        # =========================================================
+        # Reload configuration
+        # =========================================================
 
         reload_item = Gtk.MenuItem(
             label="Reload configuration"
@@ -331,22 +366,30 @@ class TrayIcon:
             reload_item
         )
 
-        open_config = Gtk.MenuItem(
+        # =========================================================
+        # Open config folder
+        # =========================================================
+
+        open_config_item = Gtk.MenuItem(
             label="Open config folder"
         )
 
-        open_config.connect(
+        open_config_item.connect(
             "activate",
             self._handle_open_config,
         )
 
         menu.append(
-            open_config
+            open_config_item
         )
 
         menu.append(
             self._separator()
         )
+
+        # =========================================================
+        # Quit
+        # =========================================================
 
         quit_item = Gtk.MenuItem(
             label="Quit"
@@ -361,6 +404,10 @@ class TrayIcon:
             quit_item
         )
 
+        # =========================================================
+        # Finalize
+        # =========================================================
+
         menu.show_all()
 
         self._status_icon.set_primary_menu(
@@ -373,6 +420,12 @@ class TrayIcon:
 
         self._menu = menu
 
+        self._status_icon.set_icon_name(
+            self._resolve_tray_icon_name()
+        )
+
+        # Tooltip still tells us what is active
+        # without wasting space inside the menu.
         if current_profile is not None:
             tooltip = (
                 "Cinnameleon: "
@@ -396,11 +449,9 @@ class TrayIcon:
             tooltip
         )
 
-    def _handle_open_window(
-        self,
-        _: Gtk.MenuItem,
-    ) -> None:
-        self._on_open_window()
+    # =========================================================
+    # Events
+    # =========================================================
 
     def _handle_profile_toggled(
         self,
@@ -428,6 +479,12 @@ class TrayIcon:
             mode
         )
 
+    def _handle_open_window(
+        self,
+        _: Gtk.MenuItem,
+    ) -> None:
+        self._on_open_window()
+
     def _handle_reload(
         self,
         _: Gtk.MenuItem,
@@ -446,9 +503,15 @@ class TrayIcon:
     ) -> None:
         self._on_quit()
 
+    # =========================================================
+    # Cleanup
+    # =========================================================
+
     def destroy(
         self,
     ) -> None:
+        """Hide the tray icon."""
+
         self._status_icon.set_visible(
             False
         )

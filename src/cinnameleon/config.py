@@ -19,10 +19,17 @@ from cinnameleon.models import (
     IssueLevel,
     Profile,
     ThemeVariants,
+    ANSI_COLOR_KEYS,
+    TerminalPalette,
+    TerminalSettings,
 )
 
 
 PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+HEX_COLOR_PATTERN = re.compile(
+    r"^#[0-9a-fA-F]{6}$"
+)
 
 ROOT_KEYS = {
     "wallpaper_directory",
@@ -51,10 +58,29 @@ FONT_KEYS = {
     "window_title",
 }
 
+TERMINAL_KEYS = {
+    "dark",
+    "light",
+}
+
+TERMINAL_PALETTE_KEYS = {
+    "background",
+    "foreground",
+    "cursor",
+    "selection_background",
+    "selection_foreground",
+    "ansi",
+}
+
+ANSI_KEYS = set(
+    ANSI_COLOR_KEYS
+)
+
 PROFILE_KEYS = {
     "id",
     "name",
     "wallpaper",
+    "terminal",
     *APPEARANCE_KEYS,
 }
 
@@ -261,6 +287,274 @@ def _parse_fonts(
         ),
     )
 
+def _parse_hex_color(
+    value: Any,
+    location: str,
+    issues: list[ConfigIssue],
+) -> str | None:
+    color = _required_string(
+        value,
+        location,
+        issues,
+    )
+
+    if color is None:
+        return None
+
+    if not HEX_COLOR_PATTERN.fullmatch(
+        color
+    ):
+        _add_error(
+            issues,
+            location,
+            (
+                "Expected a hexadecimal color "
+                "in #RRGGBB format."
+            ),
+        )
+
+        return None
+
+    return color.upper()
+
+
+def _parse_terminal_palette(
+    value: Any,
+    location: str,
+    issues: list[ConfigIssue],
+) -> TerminalPalette | None:
+    if value is None:
+        return None
+
+    if not isinstance(
+        value,
+        Mapping,
+    ):
+        _add_error(
+            issues,
+            location,
+            "Expected a terminal palette mapping.",
+        )
+
+        return None
+
+    _warn_unknown_keys(
+        value,
+        TERMINAL_PALETTE_KEYS,
+        location,
+        issues,
+    )
+
+    background = _parse_hex_color(
+        value.get("background"),
+        f"{location}.background",
+        issues,
+    )
+
+    foreground = _parse_hex_color(
+        value.get("foreground"),
+        f"{location}.foreground",
+        issues,
+    )
+
+    cursor = _parse_hex_color(
+        value.get("cursor"),
+        f"{location}.cursor",
+        issues,
+    )
+
+    selection_background = _parse_hex_color(
+        value.get(
+            "selection_background"
+        ),
+        (
+            f"{location}."
+            "selection_background"
+        ),
+        issues,
+    )
+
+    selection_foreground = _parse_hex_color(
+        value.get(
+            "selection_foreground"
+        ),
+        (
+            f"{location}."
+            "selection_foreground"
+        ),
+        issues,
+    )
+
+    raw_ansi = value.get(
+        "ansi"
+    )
+
+    ansi: list[str] = []
+
+    if not isinstance(
+        raw_ansi,
+        Mapping,
+    ):
+        _add_error(
+            issues,
+            f"{location}.ansi",
+            (
+                "Expected a mapping containing "
+                "the 16 ANSI colors."
+            ),
+        )
+
+    else:
+        _warn_unknown_keys(
+            raw_ansi,
+            ANSI_KEYS,
+            f"{location}.ansi",
+            issues,
+        )
+
+        for key in ANSI_COLOR_KEYS:
+            color = _parse_hex_color(
+                raw_ansi.get(key),
+                f"{location}.ansi.{key}",
+                issues,
+            )
+
+            if color is not None:
+                ansi.append(
+                    color
+                )
+
+    if (
+        background is None
+        or foreground is None
+        or cursor is None
+        or selection_background
+        is None
+        or selection_foreground
+        is None
+        or len(ansi) != 16
+    ):
+        return None
+
+    return TerminalPalette(
+        background=background,
+        foreground=foreground,
+        cursor=cursor,
+        selection_background=(
+            selection_background
+        ),
+        selection_foreground=(
+            selection_foreground
+        ),
+        ansi=tuple(
+            ansi
+        ),
+    )
+
+
+def _parse_terminal(
+    value: Any,
+    location: str,
+    issues: list[ConfigIssue],
+) -> TerminalSettings:
+    if value is None:
+        return TerminalSettings()
+
+    if not isinstance(
+        value,
+        Mapping,
+    ):
+        _add_error(
+            issues,
+            location,
+            (
+                "Expected a mapping with "
+                "dark/light terminal palettes."
+            ),
+        )
+
+        return TerminalSettings()
+
+    _warn_unknown_keys(
+        value,
+        TERMINAL_KEYS,
+        location,
+        issues,
+    )
+
+    return TerminalSettings(
+        dark=_parse_terminal_palette(
+            value.get("dark"),
+            f"{location}.dark",
+            issues,
+        ),
+        light=_parse_terminal_palette(
+            value.get("light"),
+            f"{location}.light",
+            issues,
+        ),
+    )
+
+def _parse_defaults(
+    value: Any,
+    location: str,
+    issues: list[ConfigIssue],
+) -> tuple[
+    AppearanceSettings,
+    TerminalSettings,
+]:
+    """
+    Parse global defaults.
+
+    Desktop appearance and terminal palettes live
+    together under the YAML `defaults` mapping.
+    """
+
+    if value is None:
+        return (
+            AppearanceSettings(),
+            TerminalSettings(),
+        )
+
+    if not isinstance(
+        value,
+        Mapping,
+    ):
+        _add_error(
+            issues,
+            location,
+            "Expected a defaults mapping.",
+        )
+
+        return (
+            AppearanceSettings(),
+            TerminalSettings(),
+        )
+
+    # _parse_appearance() should not see `terminal`,
+    # otherwise it considers it an unknown appearance key.
+    appearance_value = {
+        key: item
+        for key, item in value.items()
+        if key != "terminal"
+    }
+
+    appearance = _parse_appearance(
+        appearance_value,
+        location,
+        issues,
+    )
+
+    terminal = _parse_terminal(
+        value.get("terminal"),
+        f"{location}.terminal",
+        issues,
+    )
+
+    return (
+        appearance,
+        terminal,
+    )
 
 def _parse_appearance(
     value: Any,
@@ -508,6 +802,11 @@ def _parse_profile(
         name=name,
         wallpaper=wallpaper,
         appearance=appearance,
+        terminal=_parse_terminal(
+            value.get("terminal"),
+            f"{location}.terminal",
+            issues,
+        ),
     )
 
 
@@ -595,10 +894,12 @@ def load_configuration(
         issues,
     )
 
-    defaults = _parse_appearance(
-        raw_config.get("defaults"),
-        "defaults",
-        issues,
+    defaults, terminal_defaults = (
+        _parse_defaults(
+            raw_config.get("defaults"),
+            "defaults",
+            issues,
+        )
     )
 
     raw_profiles = raw_config.get("profiles")
@@ -675,6 +976,7 @@ def load_configuration(
         wallpaper_directory=wallpaper_directory,
         defaults=defaults,
         profiles=tuple(profiles),
+        terminal_defaults=terminal_defaults,
     )
 
     return ConfigLoadResult(

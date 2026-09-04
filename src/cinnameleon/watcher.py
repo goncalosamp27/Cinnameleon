@@ -28,7 +28,10 @@ from cinnameleon.snapshot import (
     SnapshotError,
     SnapshotStore,
 )
-
+from cinnameleon.terminal_backend import (
+    GnomeTerminalBackend,
+    TerminalBackendError,
+)
 
 PICTURE_URI_KEY = "picture-uri"
 
@@ -78,6 +81,9 @@ class WallpaperWatcher:
         self._configuration = configuration
         self._mode = mode
         self._backend = backend or SettingsBackend()
+        self._terminal_backend = (
+            GnomeTerminalBackend()
+        )
         self._snapshot_store = snapshot_store or SnapshotStore()
         self._on_message = on_message
         self._on_state_changed = on_state_changed
@@ -458,6 +464,9 @@ class WallpaperWatcher:
 
         self._processing = True
 
+        terminal_previous = None
+        terminal_applied = False
+
         try:
             changes = (
                 self._backend.plan_profile(
@@ -472,7 +481,35 @@ class WallpaperWatcher:
                 if change.requires_update
             )
 
-            if not required_changes:
+            terminal_palette = (
+                effective_profile
+                .terminal_palette
+            )
+
+            terminal_required = False
+
+            if terminal_palette is not None:
+                if (
+                    self._terminal_backend
+                    .is_available()
+                ):
+                    terminal_required = (
+                        self._terminal_backend
+                        .needs_apply(
+                            terminal_palette
+                        )
+                    )
+
+                else:
+                    self._emit(
+                        "Terminal palette configured, "
+                        "but GNOME Terminal was not detected."
+                    )
+
+            if (
+                not required_changes
+                and not terminal_required
+            ):
                 self._emit(
                     "Profile already active: "
                     f"{profile.name} "
@@ -485,29 +522,53 @@ class WallpaperWatcher:
 
                 return True
 
-            snapshot = (
-                self._backend.capture_snapshot()
-            )
+            # Apply terminal first so it can easily be
+            # restored if the desktop application fails.
 
-            snapshot_path = (
-                self._snapshot_store.save(
-                    snapshot
+            if (
+                terminal_required
+                and terminal_palette
+                is not None
+            ):
+                terminal_previous = (
+                    self._terminal_backend
+                    .read_palette()
                 )
-            )
 
-            self._backend.apply_changes(
-                required_changes
-            )
+                self._terminal_backend.apply_palette(
+                    terminal_palette
+                )
+
+                terminal_applied = True
+
+                self._emit(
+                    "Applied GNOME Terminal palette."
+                )
+
+            if required_changes:
+                snapshot = (
+                    self._backend
+                    .capture_snapshot()
+                )
+
+                snapshot_path = (
+                    self._snapshot_store
+                    .save(snapshot)
+                )
+
+                self._backend.apply_changes(
+                    required_changes
+                )
+
+                self._emit(
+                    "Safety snapshot: "
+                    f"{snapshot_path}"
+                )
 
             self._emit(
                 "Applied profile: "
                 f"{profile.name} "
                 f"({self._mode.value})"
-            )
-
-            self._emit(
-                "Safety snapshot: "
-                f"{snapshot_path}"
             )
 
             self._notify_state(
@@ -519,7 +580,21 @@ class WallpaperWatcher:
         except (
             SettingsBackendError,
             SnapshotError,
+            TerminalBackendError,
         ) as error:
+            if (
+                terminal_applied
+                and terminal_previous
+                is not None
+            ):
+                try:
+                    self._terminal_backend.apply_palette(
+                        terminal_previous
+                    )
+
+                except TerminalBackendError:
+                    pass
+
             self._last_wallpaper = None
 
             self._emit(

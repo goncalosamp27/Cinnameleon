@@ -7,6 +7,26 @@ from enum import Enum
 from pathlib import Path
 
 
+ANSI_COLOR_KEYS = (
+    "black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "white",
+    "bright_black",
+    "bright_red",
+    "bright_green",
+    "bright_yellow",
+    "bright_blue",
+    "bright_magenta",
+    "bright_cyan",
+    "bright_white",
+)
+
+
 class IssueLevel(str, Enum):
     """Severity level of a configuration issue."""
 
@@ -45,12 +65,58 @@ class FontSettings:
 class AppearanceSettings:
     """Appearance values shared by defaults and profiles."""
 
-    gtk_theme: ThemeVariants = field(default_factory=ThemeVariants)
-    cinnamon_theme: ThemeVariants = field(default_factory=ThemeVariants)
-    window_borders: ThemeVariants = field(default_factory=ThemeVariants)
-    icon_theme: ThemeVariants = field(default_factory=ThemeVariants)
-    cursor_theme: ThemeVariants = field(default_factory=ThemeVariants)
-    fonts: FontSettings = field(default_factory=FontSettings)
+    gtk_theme: ThemeVariants = field(
+        default_factory=ThemeVariants
+    )
+
+    cinnamon_theme: ThemeVariants = field(
+        default_factory=ThemeVariants
+    )
+
+    window_borders: ThemeVariants = field(
+        default_factory=ThemeVariants
+    )
+
+    icon_theme: ThemeVariants = field(
+        default_factory=ThemeVariants
+    )
+
+    cursor_theme: ThemeVariants = field(
+        default_factory=ThemeVariants
+    )
+
+    fonts: FontSettings = field(
+        default_factory=FontSettings
+    )
+
+
+@dataclass(frozen=True)
+class TerminalPalette:
+    """Normalized 16-color terminal palette."""
+
+    background: str
+    foreground: str
+    cursor: str
+
+    selection_background: str
+    selection_foreground: str
+
+    ansi: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.ansi) != 16:
+            raise ValueError(
+                "A terminal palette must contain "
+                "exactly 16 ANSI colors."
+            )
+
+
+@dataclass(frozen=True)
+class TerminalSettings:
+    """Dark/light terminal palettes belonging to a profile."""
+
+    dark: TerminalPalette | None = None
+    light: TerminalPalette | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +128,10 @@ class Profile:
     wallpaper: Path
     appearance: AppearanceSettings
 
+    terminal: TerminalSettings = field(
+        default_factory=TerminalSettings
+    )
+
 
 @dataclass(frozen=True)
 class Configuration:
@@ -71,6 +141,9 @@ class Configuration:
     wallpaper_directory: Path
     defaults: AppearanceSettings
     profiles: tuple[Profile, ...]
+    terminal_defaults: TerminalSettings = field(
+        default_factory=TerminalSettings
+    )
 
 
 @dataclass(frozen=True)
@@ -82,33 +155,34 @@ class ConfigLoadResult:
 
     @property
     def has_errors(self) -> bool:
-        """Return whether at least one validation error exists."""
-
         return any(
             issue.level is IssueLevel.ERROR
             for issue in self.issues
         )
 
     @property
-    def warnings(self) -> tuple[ConfigIssue, ...]:
-        """Return all configuration warnings."""
-
+    def warnings(
+        self,
+    ) -> tuple[ConfigIssue, ...]:
         return tuple(
             issue
             for issue in self.issues
-            if issue.level is IssueLevel.WARNING
+            if issue.level
+            is IssueLevel.WARNING
         )
 
     @property
-    def errors(self) -> tuple[ConfigIssue, ...]:
-        """Return all configuration errors."""
-
+    def errors(
+        self,
+    ) -> tuple[ConfigIssue, ...]:
         return tuple(
             issue
             for issue in self.issues
-            if issue.level is IssueLevel.ERROR
+            if issue.level
+            is IssueLevel.ERROR
         )
-    
+
+
 class Mode(str, Enum):
     """Global appearance mode."""
 
@@ -118,14 +192,17 @@ class Mode(str, Enum):
 
 @dataclass(frozen=True)
 class EffectiveAppearance:
-    """Final appearance values after resolving profile and defaults."""
+    """Final desktop appearance after resolving defaults."""
 
     gtk_theme: str | None = None
     cinnamon_theme: str | None = None
     window_borders: str | None = None
     icon_theme: str | None = None
     cursor_theme: str | None = None
-    fonts: FontSettings = field(default_factory=FontSettings)
+
+    fonts: FontSettings = field(
+        default_factory=FontSettings
+    )
 
 
 @dataclass(frozen=True)
@@ -137,3 +214,7 @@ class EffectiveProfile:
     mode: Mode
     wallpaper: Path
     appearance: EffectiveAppearance
+
+    # None means:
+    # Cinnameleon must leave terminal colors untouched.
+    terminal_palette: TerminalPalette | None = None

@@ -11,6 +11,8 @@ from cinnameleon.models import (
     Mode,
     Profile,
     ThemeVariants,
+    TerminalSettings,
+    TerminalPalette,    
 )
 
 
@@ -105,6 +107,28 @@ def _resolve_fonts(
         ),
     )
 
+def _terminal_palette_for_mode(
+    profile_terminal: TerminalSettings,
+    default_terminal: TerminalSettings,
+    mode: Mode,
+) -> TerminalPalette | None:
+    """
+    Resolve terminal palette using the same inheritance
+    principle as the rest of Cinnameleon.
+
+    profile override -> defaults -> None
+    """
+
+    if mode is Mode.DARK:
+        return (
+            profile_terminal.dark
+            or default_terminal.dark
+        )
+
+    return (
+        profile_terminal.light
+        or default_terminal.light
+    )
 
 def resolve_appearance(
     profile: AppearanceSettings,
@@ -170,4 +194,11 @@ def resolve_profile(
         mode=mode,
         wallpaper=profile.wallpaper,
         appearance=appearance,
+        terminal_palette=(
+            _terminal_palette_for_mode(
+                profile.terminal,
+                configuration.terminal_defaults,
+                mode,
+            )
+        ),
     )

@@ -31,6 +31,10 @@ from cinnameleon.resource_picker import (
     IconThemePickerDialog,
 )
 
+from cinnameleon.terminal_palette_editor import (
+    TerminalPaletteEditor,
+)
+
 ApplyCallback = Callable[
     [EffectiveProfile],
     bool,
@@ -134,6 +138,10 @@ class MainWindow(
 
         self.set_title(
             "Cinnameleon"
+        )
+
+        self.set_icon_name(
+            "io.github.goncalosamp27.cinnameleon"
         )
 
         self.set_default_size(
@@ -843,6 +851,17 @@ class MainWindow(
             0,
         )
 
+        self._terminal_editor = (
+            TerminalPaletteEditor()
+        )
+
+        box.pack_start(
+            self._terminal_editor,
+            False,
+            False,
+            0,
+        )
+
         self._interface_font.connect(
             "changed",
             self._update_font_preview,
@@ -920,9 +939,7 @@ class MainWindow(
             label=text
         )
 
-        label.set_xalign(
-            0
-        )
+        label.set_xalign(0)
 
         grid.attach(
             label,
@@ -932,9 +949,18 @@ class MainWindow(
             1,
         )
 
-        combo.set_hexpand(
-            True
+        combo.set_hexpand(True)
+
+        # Do not let the mouse wheel change the selected
+        # item while scrolling through the Cinnameleon window.
+        combo.connect(
+            "scroll-event",
+            lambda *_: True,
         )
+
+        # Selection should be changed explicitly by opening
+        # the dropdown and clicking an option.
+        combo.set_can_focus(False)
 
         grid.attach(
             combo,
@@ -1309,6 +1335,10 @@ class MainWindow(
         )
 
         self._update_font_preview()
+
+        self._terminal_editor.load_palette(
+            effective.terminal_palette
+        )
 
         self._status.set_text(
             "Ready."
@@ -1954,6 +1984,7 @@ class MainWindow(
         )
 
         self._load_selected_profile()
+        
 
     # ---------------------------------------------------------
     # Build effective preview
@@ -2029,6 +2060,9 @@ class MainWindow(
                         )
                     ),
                 ),
+            ),
+            terminal_palette=(
+                self._terminal_editor.palette()
             ),
         )
 
@@ -2152,6 +2186,7 @@ class MainWindow(
 
         self._update_resource_summary()
         self._load_selected_profile()
+        
 
     def _update_resource_summary(
         self,
