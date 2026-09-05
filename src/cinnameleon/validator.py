@@ -135,7 +135,7 @@ def _add_missing_resource_issue(
 
     issues.append(
         ConfigIssue(
-            level=IssueLevel.ERROR,
+            level=IssueLevel.WARNING,
             location=location,
             message=(
                 f"{resource_type} was not found: "

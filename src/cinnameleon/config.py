@@ -635,11 +635,12 @@ def _resolve_wallpaper_directory(
     directory = directory.resolve()
 
     if not directory.exists():
-        _add_error(
+        _add_warning(
             issues,
             "wallpaper_directory",
             f"Directory does not exist: {directory}",
         )
+
     elif not directory.is_dir():
         _add_error(
             issues,
@@ -675,33 +676,30 @@ def _resolve_wallpaper(
         )
         return None
 
-    wallpaper = (wallpaper_directory / relative_path).resolve()
+    wallpaper = (
+        wallpaper_directory / relative_path
+    ).resolve()
 
     try:
-        wallpaper.relative_to(wallpaper_directory)
+        wallpaper.relative_to(
+            wallpaper_directory
+        )
     except ValueError:
         _add_error(
             issues,
             location,
-            "Wallpaper cannot point outside wallpaper_directory.",
+            (
+                "Wallpaper cannot point outside "
+                "wallpaper_directory."
+            ),
         )
         return None
 
-    if not wallpaper.exists():
-        _add_error(
-            issues,
-            location,
-            f"Wallpaper does not exist: {wallpaper}",
-        )
-        return None
-
-    if not wallpaper.is_file():
-        _add_error(
-            issues,
-            location,
-            f"Wallpaper is not a file: {wallpaper}",
-        )
-        return None
+    # Do NOT check whether the file exists here.
+    #
+    # This function validates the configuration/path,
+    # not the availability of the external resource.
+    # Resource availability is handled by validator.py.
 
     return wallpaper
 

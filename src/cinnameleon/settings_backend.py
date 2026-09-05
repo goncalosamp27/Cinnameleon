@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +14,15 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 
 from cinnameleon.models import EffectiveProfile
+
+from cinnameleon.resources import (
+    cinnamon_theme_exists,
+    cursor_theme_exists,
+    gtk_theme_exists,
+    icon_theme_exists,
+    window_border_theme_exists,
+)
+from cinnameleon.validator import font_exists
 
 from cinnameleon.snapshot import (
     SettingsSnapshot,
@@ -126,12 +135,15 @@ def _wallpaper_uri(path: Path) -> str:
     return Gio.File.new_for_path(str(path.resolve())).get_uri()
 
 
+ResourceValidator = Callable[[str], bool]
+
+
 def build_setting_targets(
     profile: EffectiveProfile,
     *,
     include_cinnamon_theme: bool = False,
 ) -> tuple[SettingTarget, ...]:
-    """Map an effective profile to the relevant GSettings keys."""
+    """Map an effective profile to valid GSettings targets."""
 
     appearance = profile.appearance
     fonts = appearance.fonts
@@ -155,69 +167,114 @@ def build_setting_targets(
             )
         )
 
-    add(
+    def add_resource(
+        label: str,
+        schema_id: str,
+        key: str,
+        value: str | None,
+        validator: ResourceValidator,
+    ) -> None:
+        """
+        Add a resource only when it exists.
+
+        Invalid or missing resources are deliberately skipped so
+        the current system value is preserved.
+        """
+
+        if value is None:
+            return
+
+        if not validator(value):
+            return
+
+        add(
+            label,
+            schema_id,
+            key,
+            value,
+        )
+
+    add_resource(
         "GTK theme",
         INTERFACE_SCHEMA,
         "gtk-theme",
         appearance.gtk_theme,
+        gtk_theme_exists,
     )
-    add(
+
+    add_resource(
         "Window borders",
         WINDOW_MANAGER_SCHEMA,
         "theme",
         appearance.window_borders,
+        window_border_theme_exists,
     )
-    add(
+
+    add_resource(
         "Icon theme",
         INTERFACE_SCHEMA,
         "icon-theme",
         appearance.icon_theme,
+        icon_theme_exists,
     )
-    add(
+
+    add_resource(
         "Cursor theme",
         INTERFACE_SCHEMA,
         "cursor-theme",
         appearance.cursor_theme,
+        cursor_theme_exists,
     )
-    add(
+
+    add_resource(
         "Interface font",
         INTERFACE_SCHEMA,
         "font-name",
         fonts.interface,
+        font_exists,
     )
-    add(
+
+    add_resource(
         "Document font",
         GNOME_INTERFACE_SCHEMA,
         "document-font-name",
         fonts.document,
+        font_exists,
     )
-    add(
+
+    add_resource(
         "Monospace font",
         GNOME_INTERFACE_SCHEMA,
         "monospace-font-name",
         fonts.monospace,
+        font_exists,
     )
-    add(
+
+    add_resource(
         "Window title font",
         WINDOW_MANAGER_SCHEMA,
         "titlebar-font",
         fonts.window_title,
+        font_exists,
     )
 
-    # Wallpaper is deliberately added last.
-    add(
-        "Wallpaper",
-        BACKGROUND_SCHEMA,
-        "picture-uri",
-        _wallpaper_uri(profile.wallpaper),
-    )
+    # Only apply the wallpaper when the file still exists.
+    # Otherwise keep the current system wallpaper.
+    if profile.wallpaper.is_file():
+        add(
+            "Wallpaper",
+            BACKGROUND_SCHEMA,
+            "picture-uri",
+            _wallpaper_uri(profile.wallpaper),
+        )
 
     if include_cinnamon_theme:
-        add(
+        add_resource(
             "Cinnamon theme",
             CINNAMON_THEME_SCHEMA,
             "name",
             appearance.cinnamon_theme,
+            cinnamon_theme_exists,
         )
 
     return tuple(targets)
